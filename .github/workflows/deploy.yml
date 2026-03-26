@@ -1,0 +1,67 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out the code
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Set up Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      # 3. Install dependencies
+      - name: Install Dependencies
+        run: npm ci
+
+      # 4. Build the Next.js standalone output
+      - name: Build Application
+        run: npm run build
+
+      # 5. Set up the SSH key so we can connect to the server
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      # 6. Copy the standalone server files to the VPS
+      - name: Deploy Standalone Files
+        run: |
+          rsync -avz --delete --exclude '.env' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            .next/standalone/ \
+            ${{ secrets.USERNAME }}@${{ secrets.SERVER_IP }}:/var/www/web-analytics/
+
+      # 7. Copy the static assets to the VPS
+      - name: Deploy Static Assets
+        run: |
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            .next/static/ \
+            ${{ secrets.USERNAME }}@${{ secrets.SERVER_IP }}:/var/www/web-analytics/.next/static/
+
+      # 8. Copy the public assets to the VPS
+      - name: Deploy Public Assets
+        run: |
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            public/ \
+            ${{ secrets.USERNAME }}@${{ secrets.SERVER_IP }}:/var/www/web-analytics/public/
+
+      # 9. Restart PM2 on the server to load the new code
+      - name: Restart Application
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.USERNAME }}@${{ secrets.SERVER_IP }} \
+            "cd /var/www/web-analytics && pm2 restart analytics --update-env"

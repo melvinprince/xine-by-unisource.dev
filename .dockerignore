@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log
+.git
+.next
+.env*
+.vercel
+deploy.ps1
+deploy.example.ps1
+*.md

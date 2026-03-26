@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: xine
+    container_name: wa-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Database connection
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-app_user}
+      - DB_PASSWORD=${DB_PASSWORD:-CHANGE_ME_db_password}
+      - DB_NAME=${DB_NAME:-analytics_db}
+      
+      # Application security
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-CHANGE_ME_dashboard_password}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - analytics-network
+
+  db:
+    image: postgres:16-alpine
+    container_name: wa-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER:-app_user}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-CHANGE_ME_db_password}
+      - POSTGRES_DB=${DB_NAME:-analytics_db}
+    volumes:
+      - wa-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-app_user} -d ${DB_NAME:-analytics_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - analytics-network
+
+networks:
+  analytics-network:
+    driver: bridge
+
+volumes:
+  wa-db-data:
