@@ -51,12 +51,12 @@ Thank you for your interest in contributing! This guide will help you get starte
 
 ### Reporting Bugs
 
-- Use the [Bug Report](https://github.com/melvinprince/xine/issues/new?template=bug_report.md) issue template
+- Use the [Bug Report](https://github.com/melvinprince/xine-by-unisource.dev/issues/new?template=bug_report.md) issue template
 - Include steps to reproduce, expected vs actual behavior, and your environment details
 
 ### Suggesting Features
 
-- Use the [Feature Request](https://github.com/melvinprince/xine/issues/new?template=feature_request.md) issue template
+- Use the [Feature Request](https://github.com/melvinprince/xine-by-unisource.dev/issues/new?template=feature_request.md) issue template
 - Explain the use case and why it would be valuable
 
 ### Submitting Code

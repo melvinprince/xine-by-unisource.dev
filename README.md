@@ -2,7 +2,7 @@
 
 Privacy-first, cookie-free web analytics — a lightweight alternative to Google Analytics. Self-host on your own VPS, or deploy for free with Vercel + Supabase. Own your data.
 
-[Report Bug](https://github.com/melvinprince/xine/issues/new?template=bug_report.md) · [Request Feature](https://github.com/melvinprince/xine/issues/new?template=feature_request.md)
+[Report Bug](https://github.com/melvinprince/xine-by-unisource.dev/issues/new?template=bug_report.md) · [Request Feature](https://github.com/melvinprince/xine-by-unisource.dev/issues/new?template=feature_request.md)
 
 ---
 
@@ -78,7 +78,7 @@ The easiest way to get started is using Docker Compose. This spins up both the X
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/melvinprince/xine.git
+   git clone https://github.com/melvinprince/xine-by-unisource.dev.git
    cd xine
    ```
 
@@ -110,7 +110,7 @@ The fastest way to deploy for free without managing a server.
 
 4. **Initialize Database:** Once deployed, run migrations locally against your Supabase DB:
    ```bash
-   git clone https://github.com/melvinprince/xine.git
+   git clone https://github.com/melvinprince/xine-by-unisource.dev.git
    cd xine
    npm install
    # Set DATABASE_URL in .env.local, then run:
@@ -130,7 +130,7 @@ The fastest way to deploy for free without managing a server.
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/melvinprince/xine.git
+git clone https://github.com/melvinprince/xine-by-unisource.dev.git
 cd xine
 ```
 
