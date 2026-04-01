@@ -5,7 +5,7 @@ const COOKIE_NAME = "analytics_session";
 /**
  * POST /api/auth/logout
  *
- * Clears the session cookie and returns a redirect to /login.
+ * Clears the session cookie.
  */
 export async function POST() {
   const response = NextResponse.json(
@@ -43,4 +43,3 @@ export async function GET(request: NextRequest) {
 
   return response;
 }
-

@@ -9,6 +9,7 @@ import { randomUUID } from "crypto";
  */
 export async function GET() {
   try {
+    // Now protected by proxy.ts auth — safe to return all fields
     const data = await db
       .select()
       .from(sites)

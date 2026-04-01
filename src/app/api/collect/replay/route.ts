@@ -38,6 +38,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // VULN-010 FIX: Enforce size limits to prevent storage exhaustion
+    const MAX_EVENTS = 500;
+    const MAX_PAYLOAD_SIZE = 1024 * 1024; // 1MB
+    const truncatedEvents = events.slice(0, MAX_EVENTS);
+    const payloadSize = JSON.stringify(truncatedEvents).length;
+    if (payloadSize > MAX_PAYLOAD_SIZE) {
+      return NextResponse.json(
+        { error: "Payload too large" },
+        { status: 413, headers }
+      );
+    }
+
     let siteId = getCachedSiteId(api_key);
 
     if (siteId === undefined) {
@@ -70,9 +82,9 @@ export async function POST(request: NextRequest) {
     db.insert(replayEvents)
       .values({
         site_id: siteId,
-        session_id,
-        url: url || "",
-        events: events,
+        session_id: typeof session_id === "string" ? session_id.slice(0, 128) : "",
+        url: typeof url === "string" ? url.slice(0, 4096) : "",
+        events: truncatedEvents,
       })
       .catch((err) => {
         console.error("[collect/replay] bg insert error", err);

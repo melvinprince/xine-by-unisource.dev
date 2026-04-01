@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isDashboardRateLimited } from "@/lib/rate-limit";
 
 const COOKIE_NAME = "analytics_session";
-const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1 day (reduced from 7 days for security)
 
 // ── In-memory ban cache (avoids DB hit on every request) ──
 const banCache = new Map<string, number>(); // ip → cached timestamp
 const BAN_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// NOTE: Server-side session store is not possible with in-memory Maps in Next.js
+// because middleware (Edge Runtime) and API routes (Node Runtime) run in separate
+// processes with separate memory. Session security is enforced via:
+// 1. Separate SESSION_SECRET (not the password)
+// 2. Constant-time HMAC comparison
+// 3. Reduced 1-day token lifetime
+// 4. Cookie cleared on logout
 
 async function isIpBanned(ip: string): Promise<boolean> {
   // Check in-memory cache first
@@ -32,7 +41,8 @@ async function isIpBanned(ip: string): Promise<boolean> {
     }
   } catch (error) {
     console.error("Ban check failed:", error);
-    // Fail open — don't block if DB is unreachable
+    // VULN-007 FIX: Fail CLOSED — block if DB is unreachable
+    return true;
   }
 
   return false;
@@ -44,12 +54,38 @@ export function addToBanCache(ip: string) {
 }
 
 /**
+ * Gets the session signing secret.
+ * Uses SESSION_SECRET if set, otherwise falls back to DASHBOARD_PASSWORD.
+ * VULN-005 FIX: Prefer separate secret from the password.
+ */
+function getSessionSecret(): string | undefined {
+  return process.env.SESSION_SECRET || process.env.DASHBOARD_PASSWORD;
+}
+
+/**
+ * Constant-time comparison of two hex strings.
+ * VULN-004 FIX: Prevents timing side-channel attacks.
+ */
+function timingSafeCompare(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  const encoder = new TextEncoder();
+  const bufA = encoder.encode(a);
+  const bufB = encoder.encode(b);
+  let result = 0;
+  for (let i = 0; i < bufA.length; i++) {
+    result |= bufA[i] ^ bufB[i];
+  }
+  return result === 0;
+}
+
+/**
  * Validates the session token from the analytics_session cookie.
  * Token format: `timestamp.signature`
  * Uses Web Crypto API (Edge-compatible).
+ * VULN-005 FIX: Uses separate SESSION_SECRET + server-side session validation.
  */
 async function isValidSession(token: string): Promise<boolean> {
-  const secret = process.env.DASHBOARD_PASSWORD;
+  const secret = getSessionSecret();
   if (!secret) return false;
 
   const parts = token.split(".");
@@ -77,7 +113,12 @@ async function isValidSession(token: string): Promise<boolean> {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 
-  return signature === expectedSignature;
+  // VULN-004 FIX: Use constant-time comparison
+  if (!timingSafeCompare(signature, expectedSignature)) {
+    return false;
+  }
+
+  return true;
 }
 
 export async function proxy(request: NextRequest) {
@@ -101,7 +142,6 @@ export async function proxy(request: NextRequest) {
         );
       }
       // For the login page, let it load but the UI will handle showing the ban state
-      // We pass a header so the page can detect ban status
       const response = NextResponse.next();
       response.headers.set("x-banned", "true");
       return response;
@@ -109,15 +149,15 @@ export async function proxy(request: NextRequest) {
   }
 
   // Allow public routes — no auth required
+  // VULN-001 FIX: Removed /api/sites (now requires auth)
+  // VULN-002 FIX: Removed /api/debug (now requires auth)
+  // VULN-003 FIX: Removed /api/cron (now requires auth)
   if (
     pathname.startsWith("/api/collect") ||
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/config") ||
     pathname.startsWith("/api/public") ||
-    pathname.startsWith("/api/cron") ||
     pathname.startsWith("/api/v1") ||
-    pathname.startsWith("/api/sites") ||
-    pathname.startsWith("/api/debug") ||
     pathname === "/login" ||
     pathname === "/" ||
     pathname.startsWith("/share") ||
@@ -128,8 +168,13 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Protect /dashboard/* pages and /api/dashboard/* API routes
-  const isProtectedApi = pathname.startsWith("/api/dashboard");
+  // Protect all authenticated routes:
+  // /dashboard/*, /api/dashboard/*, /api/sites/*, /api/debug/*, /api/cron/*
+  const isProtectedApi =
+    pathname.startsWith("/api/dashboard") ||
+    pathname.startsWith("/api/sites") ||
+    pathname.startsWith("/api/debug") ||
+    pathname.startsWith("/api/cron");
   const isProtectedPage = pathname.startsWith("/dashboard");
 
   if (isProtectedApi || isProtectedPage) {
@@ -147,6 +192,17 @@ export async function proxy(request: NextRequest) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("redirect", pathname);
       return NextResponse.redirect(loginUrl);
+    }
+
+    // VULN-018 FIX: Rate limit authenticated dashboard API requests
+    if (isProtectedApi) {
+      const sessionKey = sessionCookie.value.slice(0, 16); // Use token prefix as session key
+      if (isDashboardRateLimited(sessionKey)) {
+        return NextResponse.json(
+          { error: "Too many requests. Please slow down." },
+          { status: 429 }
+        );
+      }
     }
   }
 

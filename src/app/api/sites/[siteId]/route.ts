@@ -50,7 +50,7 @@ export async function DELETE(
 /**
  * PATCH /api/sites/[siteId] — Update a site's name or domain.
  *
- * Body: { name?: string, domain?: string }
+ * Body: { name?: string, domain?: string, is_public?: boolean, api_access_enabled?: boolean }
  */
 export async function PATCH(
   request: NextRequest,
@@ -69,12 +69,24 @@ export async function PATCH(
     const body = await request.json();
     const updates: Record<string, any> = {};
 
-    if (body.name !== undefined) updates.name = body.name;
+    // Regular fields — safe to update
+    if (body.name !== undefined) {
+      if (typeof body.name !== "string" || body.name.length > 256) {
+        return NextResponse.json({ error: "Invalid name" }, { status: 400 });
+      }
+      updates.name = body.name;
+    }
     if (body.domain !== undefined) {
+      if (typeof body.domain !== "string" || body.domain.length > 512) {
+        return NextResponse.json({ error: "Invalid domain" }, { status: 400 });
+      }
       updates.domain = body.domain
         .replace(/^https?:\/\//, "")
         .replace(/\/$/, "");
     }
+
+    // VULN-015 FIX: Security-sensitive fields — explicitly handled
+    // These require auth (now enforced by proxy.ts after VULN-001 fix)
     if (body.is_public !== undefined) updates.is_public = body.is_public === true;
     if (body.api_access_enabled !== undefined) updates.api_access_enabled = body.api_access_enabled === true;
 

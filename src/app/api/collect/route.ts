@@ -18,8 +18,10 @@ let saltDate = "";
 function getDailySalt(): string {
   const today = new Date().toISOString().slice(0, 10);
   if (today !== saltDate) {
+    // VULN-014 FIX: Include server-side secret in salt to prevent precomputation
+    const serverSecret = process.env.SESSION_SECRET || process.env.DASHBOARD_PASSWORD || "";
     dailySalt = createHash("sha256")
-      .update(today + "-wa-pro-salt-" + process.env.NODE_ENV)
+      .update(today + "-wa-pro-salt-" + serverSecret + "-" + process.env.NODE_ENV)
       .digest("hex")
       .slice(0, 16);
     saltDate = today;
@@ -85,7 +87,36 @@ function isSpamReferrer(referrer: string): boolean {
   return SPAM_REFERRER_KEYWORDS.some(kw => lower.includes(kw));
 }
 
+// VULN-009 FIX: Input sanitization helpers
+const MAX_STRING_LENGTH = 2048; // Max length for any single field
+const MAX_URL_LENGTH = 4096;
+
+function sanitizeString(val: unknown, maxLen = MAX_STRING_LENGTH): string {
+  if (typeof val !== "string") return "";
+  // Truncate to max length
+  const truncated = val.slice(0, maxLen);
+  // Strip null bytes (PostgreSQL doesn't accept them)
+  return truncated.replace(/\0/g, "");
+}
+
+function sanitizeUrl(val: unknown): string {
+  return sanitizeString(val, MAX_URL_LENGTH);
+}
+
+// Sanitize for CSV injection prevention when data is later exported
+function sanitizeCsvSafe(val: unknown, maxLen = MAX_STRING_LENGTH): string {
+  const clean = sanitizeString(val, maxLen);
+  // Strip leading characters that trigger formula execution in spreadsheets
+  if (/^[=+\-@\t\r]/.test(clean)) {
+    return "'" + clean;
+  }
+  return clean;
+}
+
 // ---- CORS + Performance Headers ----
+// Access-Control-Allow-Credentials is required because sendBeacon uses credentials mode "include".
+// This is safe: the endpoint is write-only, and the dashboard session cookie is SameSite=Lax
+// (not sent on cross-origin POST requests).
 function getHeaders(request?: NextRequest) {
   const origin = request?.headers.get("origin") || "*";
   return {
@@ -176,28 +207,29 @@ async function processPayload(
     switch (type) {
       case "pageview": {
         // Insert pageview row
+        // VULN-009 FIX: Sanitize all input fields with length limits
         await db.insert(pageviews).values({
           site_id: siteId,
-          url: (data.url as string) || "",
-          referrer: (data.referrer as string) || "",
-          title: (data.title as string) || "",
-          utm_source: (data.utm_source as string) || "",
-          utm_medium: (data.utm_medium as string) || "",
-          utm_campaign: (data.utm_campaign as string) || "",
-          visitor_id: (data.visitor_id as string) || "",
-          session_id: (data.session_id as string) || "",
+          url: sanitizeUrl(data.url),
+          referrer: sanitizeUrl(data.referrer),
+          title: sanitizeCsvSafe(data.title, 512),
+          utm_source: sanitizeString(data.utm_source, 256),
+          utm_medium: sanitizeString(data.utm_medium, 256),
+          utm_campaign: sanitizeString(data.utm_campaign, 256),
+          visitor_id: sanitizeString(data.visitor_id, 128),
+          session_id: sanitizeString(data.session_id, 128),
           country,
           city,
-          browser: (data.browser as string) || "",
-          os: (data.os as string) || "",
-          device: (data.device as string) || "",
+          browser: sanitizeString(data.browser, 128),
+          os: sanitizeString(data.os, 128),
+          device: sanitizeString(data.device, 64),
           ip_hash: ipHash,
-          screen: (data.screen as string) || "",
-          language: (data.language as string) || "",
-          timezone: (data.timezone as string) || "",
+          screen: sanitizeString(data.screen, 32),
+          language: sanitizeString(data.language, 32),
+          timezone: sanitizeString(data.timezone, 64),
           duration: 0,
-          connection_type: (data.connection_type as string) || null,
-          ttfb: typeof data.ttfb === "number" ? data.ttfb : null,
+          connection_type: sanitizeString(data.connection_type, 32) || null,
+          ttfb: typeof data.ttfb === "number" ? Math.min(Math.max(data.ttfb, 0), 60000) : null,
           is_bot: isBot,
         });
 
@@ -234,13 +266,17 @@ async function processPayload(
       }
 
       case "event": {
+        // VULN-009 FIX: Sanitize event data + limit properties size
+        const rawProps = (data.properties as Record<string, unknown>) || {};
+        const propsStr = JSON.stringify(rawProps);
+        const safeProps = propsStr.length > 8192 ? {} : rawProps; // 8KB limit on properties
         await db.insert(events).values({
           site_id: siteId,
-          name: (data.name as string) || "unknown",
-          properties: (data.properties as Record<string, unknown>) || {},
-          visitor_id: (data.visitor_id as string) || "",
-          session_id: (data.session_id as string) || "",
-          url: (data.url as string) || "",
+          name: sanitizeString(data.name, 256) || "unknown",
+          properties: safeProps,
+          visitor_id: sanitizeString(data.visitor_id, 128),
+          session_id: sanitizeString(data.session_id, 128),
+          url: sanitizeUrl(data.url),
         });
 
         // Evaluate Event Goals

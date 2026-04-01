@@ -246,10 +246,14 @@ The project includes a GitHub Actions workflow (`.github/workflows/deploy.yml`) 
 | `STANDALONE_OUTPUT`| No | Set to `false` when deploying to Vercel |
 | **App Configuration**| | |
 | `DASHBOARD_PASSWORD` | Yes | Password to access the dashboard |
+| `DASHBOARD_PASSWORD_HASH` | No | (Recommended) Bcrypt hash of your password |
+| `SESSION_SECRET` | No | (Recommended) Random 64-char hex string for session crypto |
+| `CRON_SECRET` | Yes* | (Required if using cron endpoints `api/cron/*`) |
 | `CF_API_TOKEN` | No | Cloudflare API token (for cache purging) |
 | `CF_ZONE_ID` | No | Cloudflare zone ID |
 
 > **\*** Use **either** Option A (individual DB vars for self-hosted/Docker) **or** Option B (`DATABASE_URL` for cloud providers). You don't need both.
+> **\*** `CRON_SECRET` is required to authenticate cron endpoints.
 
 ## Project Structure
 
