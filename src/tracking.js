@@ -23,19 +23,11 @@
   var run = function () {
     var vid, sid;
     try {
-      vid = localStorage.getItem("_wa_vid");
-      if (!vid) {
-        vid = crypto.randomUUID();
-        localStorage.setItem("_wa_vid", vid);
-      }
-      sid = sessionStorage.getItem("_wa_sid");
-      if (!sid) {
-        sid = crypto.randomUUID();
-        sessionStorage.setItem("_wa_sid", sid);
-      }
-    } catch (e) {
       vid = crypto.randomUUID();
       sid = crypto.randomUUID();
+    } catch (e) {
+      vid = Math.random().toString(36).substring(2);
+      sid = Math.random().toString(36).substring(2);
     }
 
     var ua = navigator.userAgent;

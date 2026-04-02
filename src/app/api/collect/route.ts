@@ -141,7 +141,8 @@ async function upsertSession(
   data: Record<string, unknown>,
   country: string,
   city: string,
-  isBot: boolean
+  isBot: boolean,
+  ipHash: string
 ): Promise<void> {
   const sessionId = (data.session_id as string) || "";
   const url = (data.url as string) || "";
@@ -155,7 +156,7 @@ async function upsertSession(
       .values({
         id: sessionId,
         site_id: siteId,
-        visitor_id: (data.visitor_id as string) || "",
+        visitor_id: ipHash,
         entry_page: url,
         exit_page: url,
         page_count: 1,
@@ -216,7 +217,7 @@ async function processPayload(
           utm_source: sanitizeString(data.utm_source, 256),
           utm_medium: sanitizeString(data.utm_medium, 256),
           utm_campaign: sanitizeString(data.utm_campaign, 256),
-          visitor_id: sanitizeString(data.visitor_id, 128),
+          visitor_id: ipHash, // Forced backend IP hash for cookieless GDPR compliance
           session_id: sanitizeString(data.session_id, 128),
           country,
           city,
@@ -234,7 +235,7 @@ async function processPayload(
         });
 
         // Upsert session (fire-and-forget within fire-and-forget)
-        upsertSession(siteId, data, country, city, isBot);
+        upsertSession(siteId, data, country, city, isBot, ipHash);
 
         // Evaluate Pageview Goals
         try {
@@ -254,7 +255,7 @@ async function processPayload(
                 goal_id: goal.id,
                 site_id: siteId,
                 session_id: data.session_id as string,
-                visitor_id: data.visitor_id as string,
+                visitor_id: ipHash,
               }).onConflictDoNothing(); // prevent duplicate insert errors if any
             }
           }
@@ -274,7 +275,7 @@ async function processPayload(
           site_id: siteId,
           name: sanitizeString(data.name, 256) || "unknown",
           properties: safeProps,
-          visitor_id: sanitizeString(data.visitor_id, 128),
+          visitor_id: ipHash,
           session_id: sanitizeString(data.session_id, 128),
           url: sanitizeUrl(data.url),
         });
@@ -297,7 +298,7 @@ async function processPayload(
                 goal_id: goal.id,
                 site_id: siteId,
                 session_id: data.session_id as string,
-                visitor_id: data.visitor_id as string,
+                visitor_id: ipHash,
               });
             }
           }
