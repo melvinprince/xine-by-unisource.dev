@@ -84,7 +84,7 @@ export async function getOverviewStats(
 
   const bounceQuery = (range: DateRange) => {
     const sub = db.select({
-      cnt: sql<number>`COUNT(*)::int`,
+      cnt: sql<number>`COUNT(*)::int`.as('cnt'),
     })
     .from(pageviews)
     .where(buildFilters(siteId, range, pageviews))
@@ -138,19 +138,19 @@ export async function getVisitorTimeseries(
 ): Promise<TimeseriesPoint[]> {
   const daysDiff = differenceInDays(dateRange.to, dateRange.from);
   const bucket = daysDiff <= 2 ? 'hour' : 'day';
-  const truncatedDate = sql`DATE_TRUNC(${bucket}, ${pageviews.created_at})`;
   const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
+  const dateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${pageviews.created_at}), ${dateFormat})`;
 
   const rows = await db
     .select({
-      date: sql<string>`to_char(${truncatedDate}, ${dateFormat})`,
+      date: dateExpr,
       visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
       pageviews: sql<number>`COUNT(*)::int`,
     })
     .from(pageviews)
     .where(buildFilters(siteId, dateRange, pageviews))
-    .groupBy(truncatedDate)
-    .orderBy(truncatedDate);
+    .groupBy(dateExpr)
+    .orderBy(dateExpr);
 
   return rows;
 }

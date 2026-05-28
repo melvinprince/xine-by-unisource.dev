@@ -238,18 +238,18 @@ export async function getSessionTimeseries(
 ): Promise<SessionTimeseriesPoint[]> {
   const daysDiff = differenceInDays(dateRange.to, dateRange.from);
   const bucket = daysDiff <= 2 ? 'hour' : 'day';
-  const truncatedDate = sql`DATE_TRUNC(${bucket}, ${sessions.started_at})`;
   const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
+  const dateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${sessions.started_at}), ${dateFormat})`;
 
   const rows = await db
     .select({
-      date: sql<string>`to_char(${truncatedDate}, ${dateFormat})`,
+      date: dateExpr,
       sessions: sql<number>`COUNT(*)::int`,
     })
     .from(sessions)
     .where(buildSessionFilters(siteId, dateRange))
-    .groupBy(truncatedDate)
-    .orderBy(truncatedDate);
+    .groupBy(dateExpr)
+    .orderBy(dateExpr);
 
   return rows;
 }
@@ -609,18 +609,18 @@ export async function getWebVitalsTrends(
 ): Promise<WebVitalTrend[]> {
   const daysDiff = differenceInDays(dateRange.to, dateRange.from);
   const bucket = daysDiff <= 2 ? 'hour' : 'day';
-  const truncatedDate = sql`DATE_TRUNC(${bucket}, ${events.created_at})`;
   const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
+  const dateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${events.created_at}), ${dateFormat})`;
 
   const rows = await db
     .select({
       metric: sql<string>`(properties->>'metric')`,
-      date: sql<string>`to_char(${truncatedDate}, ${dateFormat})`,
+      date: dateExpr,
       avgValue: sql<number>`ROUND(AVG((properties->>'value')::numeric))::int`,
     })
     .from(events)
     .where(and(buildEventFilters(siteId, dateRange), eq(events.name, 'web_vital')))
-    .groupBy(sql`(properties->>'metric')`, truncatedDate);
+    .groupBy(sql`(properties->>'metric')`, dateExpr);
 
   const metricData = new Map<string, { date: string; value: number }[]>();
   rows.forEach((r) => {
@@ -630,15 +630,15 @@ export async function getWebVitalsTrends(
     metricData.get(m)!.push({ date: r.date, value: r.avgValue });
   });
 
-  const ttfbTruncatedDate = sql`DATE_TRUNC(${bucket}, ${pageviews.created_at})`;
+  const ttfbDateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${pageviews.created_at}), ${dateFormat})`;
   const ttfbRows = await db
     .select({
-      date: sql<string>`to_char(${ttfbTruncatedDate}, ${dateFormat})`,
+      date: ttfbDateExpr,
       avgValue: sql<number>`ROUND(AVG(${pageviews.ttfb}))::int`,
     })
     .from(pageviews)
     .where(and(buildPageviewFilters(siteId, dateRange), sql`${pageviews.ttfb} IS NOT NULL AND ${pageviews.ttfb} > 0`))
-    .groupBy(ttfbTruncatedDate);
+    .groupBy(ttfbDateExpr);
 
   if (ttfbRows.length > 0) {
     metricData.set("TTFB", ttfbRows.map((r) => ({ date: r.date, value: r.avgValue })));
@@ -715,18 +715,18 @@ export async function getErrorTrend(
 ): Promise<ErrorTrendPoint[]> {
   const daysDiff = differenceInDays(dateRange.to, dateRange.from);
   const bucket = daysDiff <= 2 ? 'hour' : 'day';
-  const truncatedDate = sql`DATE_TRUNC(${bucket}, ${events.created_at})`;
   const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
+  const dateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${events.created_at}), ${dateFormat})`;
 
   const rows = await db
     .select({
-      date: sql<string>`to_char(${truncatedDate}, ${dateFormat})`,
+      date: dateExpr,
       count: sql<number>`COUNT(*)::int`,
     })
     .from(events)
     .where(and(buildEventFilters(siteId, dateRange), eq(events.name, 'js_error')))
-    .groupBy(truncatedDate)
-    .orderBy(truncatedDate);
+    .groupBy(dateExpr)
+    .orderBy(dateExpr);
 
   return rows;
 }
@@ -940,10 +940,10 @@ export async function getSeoOverview(
 ) {
   const daysDiff = differenceInDays(dateRange.to, dateRange.from);
   const bucket = daysDiff <= 2 ? 'hour' : 'day';
-  const truncatedDate = sql`DATE_TRUNC(${bucket}, ${pageviews.created_at})`;
   const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
+  const dateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${pageviews.created_at}), ${dateFormat})`;
 
-  const isOrganicSql = sql<boolean>`
+  const isOrganicSql = sql<boolean>`(
     ${pageviews.referrer} ILIKE '%google.com%' OR
     ${pageviews.referrer} ILIKE '%google.co%' OR
     ${pageviews.referrer} ILIKE '%bing.com%' OR
@@ -952,7 +952,7 @@ export async function getSeoOverview(
     ${pageviews.referrer} ILIKE '%yandex.ru%' OR
     ${pageviews.referrer} ILIKE '%yandex.com%' OR
     ${pageviews.referrer} ILIKE '%ecosia.org%'
-  `;
+  )`;
 
   const engineNameSql = sql<string>`
     CASE
@@ -1003,13 +1003,13 @@ export async function getSeoOverview(
   // Timeseries
   const timeseries = await db
     .select({
-      date: sql<string>`to_char(${truncatedDate}, ${dateFormat})`,
+      date: dateExpr,
       visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
     })
     .from(pageviews)
     .where(and(buildPageviewFilters(siteId, dateRange), isOrganicSql))
-    .groupBy(truncatedDate)
-    .orderBy(truncatedDate);
+    .groupBy(dateExpr)
+    .orderBy(dateExpr);
 
   return {
     organicVisitors: stats[0]?.visitors || 0,
