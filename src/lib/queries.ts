@@ -8,6 +8,7 @@ import { db } from "./db";
 import { pageviews, events, sites, sessions } from "./db/schema";
 import { eq, gte, lte, ne, desc, sql, and } from "drizzle-orm";
 import { format, subDays, differenceInDays } from "date-fns";
+import { buildDateExpr } from "./query-helpers";
 import type {
   Site,
   OverviewStats,
@@ -136,10 +137,7 @@ export async function getVisitorTimeseries(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<TimeseriesPoint[]> {
-  const daysDiff = differenceInDays(dateRange.to, dateRange.from);
-  const bucket = daysDiff <= 2 ? 'hour' : 'day';
-  const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
-  const dateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${pageviews.created_at}), ${dateFormat})`;
+  const dateExpr = buildDateExpr(dateRange, pageviews.created_at);
 
   const rows = await db
     .select({

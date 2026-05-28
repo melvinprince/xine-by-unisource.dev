@@ -9,6 +9,7 @@ import { db } from "./db";
 import { pageviews, events, sessions } from "./db/schema";
 import { eq, gte, lte, ne, and, sql, desc } from "drizzle-orm";
 import { subDays, subMinutes, differenceInDays } from "date-fns";
+import { buildDateExpr } from "./query-helpers";
 import type {
   DateRange,
   SessionAnalytics,
@@ -236,10 +237,7 @@ export async function getSessionTimeseries(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<SessionTimeseriesPoint[]> {
-  const daysDiff = differenceInDays(dateRange.to, dateRange.from);
-  const bucket = daysDiff <= 2 ? 'hour' : 'day';
-  const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
-  const dateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${sessions.started_at}), ${dateFormat})`;
+  const dateExpr = buildDateExpr(dateRange, sessions.started_at);
 
   const rows = await db
     .select({
@@ -607,10 +605,7 @@ export async function getWebVitalsTrends(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<WebVitalTrend[]> {
-  const daysDiff = differenceInDays(dateRange.to, dateRange.from);
-  const bucket = daysDiff <= 2 ? 'hour' : 'day';
-  const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
-  const dateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${events.created_at}), ${dateFormat})`;
+  const dateExpr = buildDateExpr(dateRange, events.created_at);
 
   const rows = await db
     .select({
@@ -630,7 +625,7 @@ export async function getWebVitalsTrends(
     metricData.get(m)!.push({ date: r.date, value: r.avgValue });
   });
 
-  const ttfbDateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${pageviews.created_at}), ${dateFormat})`;
+  const ttfbDateExpr = buildDateExpr(dateRange, pageviews.created_at);
   const ttfbRows = await db
     .select({
       date: ttfbDateExpr,
@@ -713,10 +708,7 @@ export async function getErrorTrend(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<ErrorTrendPoint[]> {
-  const daysDiff = differenceInDays(dateRange.to, dateRange.from);
-  const bucket = daysDiff <= 2 ? 'hour' : 'day';
-  const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
-  const dateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${events.created_at}), ${dateFormat})`;
+  const dateExpr = buildDateExpr(dateRange, events.created_at);
 
   const rows = await db
     .select({
@@ -938,10 +930,7 @@ export async function getSeoOverview(
   siteId: string | "all",
   dateRange: DateRange
 ) {
-  const daysDiff = differenceInDays(dateRange.to, dateRange.from);
-  const bucket = daysDiff <= 2 ? 'hour' : 'day';
-  const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
-  const dateExpr = sql<string>`to_char(DATE_TRUNC(${bucket}, ${pageviews.created_at}), ${dateFormat})`;
+  const dateExpr = buildDateExpr(dateRange, pageviews.created_at);
 
   const isOrganicSql = sql<boolean>`(
     ${pageviews.referrer} ILIKE '%google.com%' OR
