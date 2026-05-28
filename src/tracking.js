@@ -437,58 +437,6 @@
           });
         }
 
-        // 9. Session Replay (Lite)
-        if (f.session_replay) {
-          var replayEvents = [];
-          
-          try {
-            var html = document.documentElement.outerHTML;
-            var sanitized = html.replace(
-              /(<input[^>]*type=["'](password|email|tel|number|credit)[^>]*value=["'])[^"']*(["'])/gi,
-              '$1[REDACTED]$3'
-            );
-            sanitized = sanitized.replace(/<[^>]*data-xine-redact[^>]*>[\s\S]*?<\/[^>]*>/gi, '[REDACTED]');
-            replayEvents.push({ type: 'snapshot', html: sanitized, width: window.innerWidth, height: window.innerHeight, time: Date.now() });
-          } catch(e) {}
-
-          var recordReplayEvent = function(eType, data) {
-            data.type = eType;
-            data.time = Date.now();
-            replayEvents.push(data);
-          };
-
-          var lastMove = 0;
-          document.addEventListener('mousemove', function(e) {
-            var now = Date.now();
-            if (now - lastMove > 250) { 
-              recordReplayEvent('mouse', { x: e.clientX, y: e.clientY });
-              lastMove = now;
-            }
-          }, { passive: true });
-
-          document.addEventListener('click', function(e) {
-            recordReplayEvent('click', { x: e.clientX, y: e.clientY });
-          }, { passive: true, capture: true });
-
-          var lastScroll = 0;
-          window.addEventListener('scroll', function() {
-            var now = Date.now();
-            if (now - lastScroll > 500) {
-              recordReplayEvent('scroll', { x: window.scrollX, y: window.scrollY });
-              lastScroll = now;
-            }
-          }, { passive: true });
-
-          setInterval(function() {
-            if (replayEvents.length > 0 && !isBlocked) {
-              var payload = { api_key: apiKey, session_id: sid, url: currentUrl, events: replayEvents };
-              fetch(endpoint.replace('/collect', '/collect/replay'), {
-                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), keepalive: true
-              }).catch(function(){ isBlocked = true; });
-              replayEvents = [];
-            }
-          }, 10000); 
-        }
 
       })
       .catch(function() { isBlocked = true; }); // If config blocked, stop all tracking

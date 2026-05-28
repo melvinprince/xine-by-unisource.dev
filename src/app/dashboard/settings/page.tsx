@@ -769,7 +769,6 @@ function SiteFeaturesForm({ siteId }: { siteId: string }) {
         { key: "custom_events", label: "Custom Events API", description: "Allow tracking via window.wa.track()", size: "0KB" },
         { key: "file_downloads", label: "File Downloads", description: "Auto track clicks on document/media URLs.", size: "~0.1KB" },
         { key: "form_abandonment", label: "Form Abandonment", description: "Capture form inputs when unsubmitted.", size: "~0.1KB" },
-        { key: "session_replay", label: "Session Replay", description: "Record and playback user interactions.", size: "~2.0KB" },
       ]
     }
   ];
@@ -781,7 +780,6 @@ function SiteFeaturesForm({ siteId }: { siteId: string }) {
     web_vitals: 0.5, js_errors: 0.2, scroll_depth: 0.2,
     outbound_clicks: 0.1, click_tracking: 0.2, rage_clicks: 0.2,
     custom_events: 0, file_downloads: 0.1, form_abandonment: 0.1,
-    session_replay: 2.0,
   };
 
   const enabledRaw = Object.entries(features)

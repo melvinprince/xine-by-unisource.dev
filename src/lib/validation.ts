@@ -78,7 +78,6 @@ export const siteFeaturesSchema = z.object({
   rage_clicks: z.boolean().optional(),
   file_downloads: z.boolean().optional(),
   form_abandonment: z.boolean().optional(),
-  session_replay: z.boolean().optional(),
 }).strict(); // Reject unknown keys
 
 export class ValidationError extends Error {

@@ -1,0 +1,3 @@
+ALTER TABLE "replay_events" DISABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP TABLE "replay_events" CASCADE;--> statement-breakpoint
+ALTER TABLE "site_settings" ALTER COLUMN "features" SET DEFAULT '{"web_vitals":true,"scroll_depth":true,"outbound_clicks":true,"js_errors":true,"custom_events":true,"click_tracking":false,"rage_clicks":false,"file_downloads":false,"form_abandonment":false}'::jsonb;

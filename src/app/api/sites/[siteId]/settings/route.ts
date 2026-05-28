@@ -29,7 +29,6 @@ export async function GET(
         rage_clicks: false,
         file_downloads: false,
         form_abandonment: false,
-        session_replay: false,
       });
     }
 

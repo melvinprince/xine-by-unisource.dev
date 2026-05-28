@@ -9,7 +9,6 @@ import {
   goalConversions,
   funnels,
   annotations,
-  replayEvents,
   emailReports,
   uptimeChecks,
   alerts,
@@ -24,7 +23,6 @@ export const sitesRelations = relations(sites, ({ many, one }) => ({
   goals: many(goals),
   funnels: many(funnels),
   annotations: many(annotations),
-  replayEvents: many(replayEvents),
   emailReports: many(emailReports),
   uptimeChecks: many(uptimeChecks),
   alerts: many(alerts),
@@ -104,13 +102,6 @@ export const annotationsRelations = relations(annotations, ({ one }) => ({
   }),
 }));
 
-// ---- Replay Events Relations ----
-export const replayEventsRelations = relations(replayEvents, ({ one }) => ({
-  site: one(sites, {
-    fields: [replayEvents.site_id],
-    references: [sites.id],
-  }),
-}));
 
 // ---- Email Reports Relations ----
 export const emailReportsRelations = relations(emailReports, ({ one }) => ({

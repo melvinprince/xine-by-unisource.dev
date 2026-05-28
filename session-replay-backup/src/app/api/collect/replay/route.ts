@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // VULN-010 FIX: Enforce size limits to prevent storage exhaustion
+    // Enforce size limits to prevent storage exhaustion
     const MAX_EVENTS = 500;
     const MAX_PAYLOAD_SIZE = 1024 * 1024; // 1MB
     const truncatedEvents = events.slice(0, MAX_EVENTS);

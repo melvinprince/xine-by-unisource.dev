@@ -144,7 +144,6 @@ export const siteSettings = pgTable("site_settings", {
     rage_clicks: false,
     file_downloads: false,
     form_abandonment: false,
-    session_replay: false,
   }),
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -213,20 +212,6 @@ export const annotations = pgTable("annotations", {
   date: timestamp("date", { withTimezone: true }).notNull(),
   category: varchar("category", { length: 50 }).default("note"),
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-// ============================================================
-// 10. REPLAY EVENTS
-// ============================================================
-export const replayEvents = pgTable("replay_events", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  site_id: uuid("site_id")
-    .notNull()
-    .references(() => sites.id, { onDelete: "cascade" }),
-  session_id: text("session_id").notNull(),
-  url: text("url").notNull(),
-  timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
-  events: jsonb("events").notNull(),
 });
 
 // ============================================================
