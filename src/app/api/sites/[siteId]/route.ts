@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { validateOrThrow, updateSiteSchema, uuidSchema, ValidationError } from "@/lib/validation";
 
 /**
  * DELETE /api/sites/[siteId] — Delete a site and cascade all its data.
@@ -12,11 +13,13 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ siteId: string }> }
 ) {
-  const { siteId } = await params;
-
-  if (!siteId) {
+  let siteId: string;
+  try {
+    const parsedParams = await params;
+    siteId = validateOrThrow(uuidSchema, parsedParams.siteId);
+  } catch (error) {
     return NextResponse.json(
-      { error: "Site ID is required" },
+      { error: "Invalid Site ID format" },
       { status: 400 }
     );
   }
@@ -56,43 +59,40 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ siteId: string }> }
 ) {
-  const { siteId } = await params;
-
-  if (!siteId) {
+  let siteId: string;
+  try {
+    const parsedParams = await params;
+    siteId = validateOrThrow(uuidSchema, parsedParams.siteId);
+  } catch (error) {
     return NextResponse.json(
-      { error: "Site ID is required" },
+      { error: "Invalid Site ID format" },
       { status: 400 }
     );
   }
 
   try {
     const body = await request.json();
-    const updates: Record<string, any> = {};
+    const validated = validateOrThrow(updateSiteSchema, body);
+    const updates: Record<string, unknown> = {};
 
-    // Regular fields — safe to update
-    if (body.name !== undefined) {
-      if (typeof body.name !== "string" || body.name.length > 256) {
-        return NextResponse.json({ error: "Invalid name" }, { status: 400 });
-      }
-      updates.name = body.name;
+    if (validated.name !== undefined) {
+      updates.name = validated.name;
     }
-    if (body.domain !== undefined) {
-      if (typeof body.domain !== "string" || body.domain.length > 512) {
-        return NextResponse.json({ error: "Invalid domain" }, { status: 400 });
-      }
-      updates.domain = body.domain
+    if (validated.domain !== undefined) {
+      updates.domain = validated.domain
         .replace(/^https?:\/\//, "")
         .replace(/\/$/, "");
     }
-
-    // VULN-015 FIX: Security-sensitive fields — explicitly handled
-    // These require auth (now enforced by proxy.ts after VULN-001 fix)
-    if (body.is_public !== undefined) updates.is_public = body.is_public === true;
-    if (body.api_access_enabled !== undefined) updates.api_access_enabled = body.api_access_enabled === true;
+    if (validated.is_public !== undefined) {
+      updates.is_public = validated.is_public;
+    }
+    if (validated.api_access_enabled !== undefined) {
+      updates.api_access_enabled = validated.api_access_enabled;
+    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json(
-        { error: "No fields to update. Provide name or domain." },
+        { error: "No fields to update." },
         { status: 400 }
       );
     }
@@ -115,6 +115,9 @@ export async function PATCH(
       created_at: new Date(result[0].created_at).toISOString(),
     });
   } catch (error: unknown) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     const pgError = error as { code?: string };
     if (pgError.code === "23505") {
       return NextResponse.json(

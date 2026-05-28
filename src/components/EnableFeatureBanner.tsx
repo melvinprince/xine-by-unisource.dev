@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { Settings, Zap } from 'lucide-react';
 import { useDashboardContext } from '@/components/DashboardContext';
 
+import Link from 'next/link';
+
 interface EnableFeatureBannerProps {
   featureKey: string;
   featureLabel: string;
@@ -88,7 +90,7 @@ export default function EnableFeatureBanner({ featureKey, featureLabel, descript
           <Zap size={12} />
           {enabling ? 'Enabling...' : 'Enable Now'}
         </button>
-        <a
+        <Link
           href="/dashboard/settings"
           style={{
             display: 'flex',
@@ -107,7 +109,7 @@ export default function EnableFeatureBanner({ featureKey, featureLabel, descript
         >
           <Settings size={12} />
           Settings
-        </a>
+        </Link>
       </div>
     </div>
   );

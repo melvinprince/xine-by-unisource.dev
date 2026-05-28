@@ -21,7 +21,7 @@ interface DashboardData {
   deviceBreakdown: DeviceBreakdown;
   browserStats: BrowserStat[];
   countryStats: CountryStat[];
-  annotations: any[];
+  annotations: { id: string; text: string; date: string; category: string }[];
 }
 
 interface SiteDetailData extends DashboardData {
@@ -113,6 +113,49 @@ export function useSiteDetail(
       setLoading(false);
     }
   }, [siteId, dateRange.from, dateRange.to]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { data, loading, error, refetch: fetchData };
+}
+
+export function useDashboardFetch<T>(
+  endpoint: string,
+  siteId: string,
+  dateRange?: { from: string; to: string }
+) {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    if (!siteId) return;
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const queryObj: Record<string, string> = { siteId };
+      if (dateRange) {
+        queryObj.from = dateRange.from;
+        queryObj.to = dateRange.to;
+      }
+      const params = new URLSearchParams(queryObj);
+      
+      const res = await fetch(`${endpoint}?${params}`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch data");
+      }
+      const json = await res.json();
+      setData(json);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpoint, siteId, dateRange?.from, dateRange?.to]);
 
   useEffect(() => {
     fetchData();

@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     
     // Default to last 24h if no range provided
     const rangeStr = searchParams.get("range") || "24h";
-    let from = new Date();
+    const from = new Date();
     
     switch (rangeStr) {
       case "24h": from.setHours(from.getHours() - 24); break;

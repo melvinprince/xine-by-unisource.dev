@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { sites, pageviews, events, sessions, goalConversions } from "@/lib/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { getCachedGoals } from "@/lib/goals-cache";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { isbot } from "isbot";
 import {
   getCachedSiteId,
@@ -192,6 +192,37 @@ async function upsertSession(
   }
 }
 
+async function resolveSessionId(
+  siteId: string,
+  ipHash: string,
+  clientSessionId: string
+): Promise<string> {
+  if (!ipHash) return clientSessionId || randomUUID();
+  const now = new Date();
+  const thirtyMinsAgo = new Date(now.getTime() - 30 * 60 * 1000);
+  try {
+    const activeSession = await db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.site_id, siteId),
+          eq(sessions.visitor_id, ipHash),
+          sql`${sessions.ended_at} >= ${thirtyMinsAgo}`
+        )
+      )
+      .orderBy(desc(sessions.ended_at))
+      .limit(1);
+
+    if (activeSession.length > 0) {
+      return activeSession[0].id;
+    }
+  } catch (err) {
+    console.error("[collect] Error resolving session ID:", err);
+  }
+  return clientSessionId || randomUUID();
+}
+
 /**
  * Processes the analytics payload in the background.
  */
@@ -204,6 +235,10 @@ async function processPayload(
   ipHash: string,
   isBot: boolean
 ): Promise<void> {
+  // Resolve active session server-side to avoid cookie/localStorage consent requirements
+  const sessionId = await resolveSessionId(siteId, ipHash, (data.session_id as string) || "");
+  data.session_id = sessionId;
+
   try {
     switch (type) {
       case "pageview": {
@@ -278,6 +313,7 @@ async function processPayload(
           visitor_id: ipHash,
           session_id: sanitizeString(data.session_id, 128),
           url: sanitizeUrl(data.url),
+          is_bot: isBot,
         });
 
         // Evaluate Event Goals
@@ -470,8 +506,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ---- Fire-and-forget ----
-    processPayload(siteId, type, data, country, city, ipHash, isBot);
+    // ---- Drop bot traffic at the edge ----
+    // Bots get a silent 204 but we skip the DB write entirely to save storage.
+    // We still return 204 (not 403) so bot operators don't know they've been filtered.
+    if (isBot) {
+      return new NextResponse(null, { status: 204, headers });
+    }
+
+    // ---- Fire-and-forget (human traffic only) ----
+    processPayload(siteId, type, data, country, city, ipHash, false);
 
     return new NextResponse(null, { status: 204, headers });
   } catch (error) {

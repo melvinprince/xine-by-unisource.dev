@@ -2,13 +2,15 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { siteSettings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { validateOrThrow, siteFeaturesSchema, uuidSchema, ValidationError } from "@/lib/validation";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ siteId: string }> }
 ) {
   try {
-    const { siteId } = await params;
+    const rawParams = await params;
+    const siteId = validateOrThrow(uuidSchema, rawParams.siteId);
 
     const rows = await db
       .select()
@@ -33,6 +35,9 @@ export async function GET(
 
     return NextResponse.json(rows[0].features || {});
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("GET site settings error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
@@ -43,27 +48,32 @@ export async function PUT(
   { params }: { params: Promise<{ siteId: string }> }
 ) {
   try {
-    const { siteId } = await params;
+    const rawParams = await params;
+    const siteId = validateOrThrow(uuidSchema, rawParams.siteId);
     const body = await request.json();
+    const validatedFeatures = validateOrThrow(siteFeaturesSchema, body);
 
     // Upsert the settings
     await db
       .insert(siteSettings)
       .values({
         site_id: siteId,
-        features: body,
+        features: validatedFeatures,
         updated_at: new Date(),
       })
       .onConflictDoUpdate({
         target: siteSettings.site_id,
         set: {
-          features: body,
+          features: validatedFeatures,
           updated_at: new Date(),
         },
       });
 
-    return NextResponse.json({ success: true, features: body });
+    return NextResponse.json({ success: true, features: validatedFeatures });
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("PUT site settings error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }

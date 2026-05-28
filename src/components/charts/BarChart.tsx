@@ -15,6 +15,7 @@ import type { BrowserStat } from '@/lib/types';
 
 interface BarChartProps {
   data: BrowserStat[];
+  title?: string;
 }
 
 const COLORS = [
@@ -44,7 +45,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   );
 }
 
-export default function BarChart({ data }: BarChartProps) {
+export default function BarChart({ data, title = "Browsers" }: BarChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,7 +72,7 @@ export default function BarChart({ data }: BarChartProps) {
           marginBottom: '1rem',
         }}
       >
-        Browsers
+        {title}
       </h3>
 
       <div style={{ width: '100%', height: 250 }}>

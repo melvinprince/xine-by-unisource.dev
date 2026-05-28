@@ -1,30 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useDashboardContext } from "@/components/DashboardContext";
+import { useDashboardFetch } from "@/hooks/use-dashboard-data";
 import SiteSelector from "@/components/SiteSelector";
 import HelpTooltip from "@/components/HelpTooltip";
-import { useDashboardContext } from "@/components/DashboardContext";
 import { format } from "date-fns";
+import type { CohortRow } from "@/lib/types";
 
 export default function RetentionPage() {
-  const { selectedSite: currentSite, sites, setSelectedSite } = useDashboardContext();
-  const [cohorts, setCohorts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { selectedSite: currentSite, dateRange, sites, setSelectedSite } = useDashboardContext();
 
-  useEffect(() => {
-    if (!currentSite) return;
+  const { data, loading } = useDashboardFetch<{ cohorts: CohortRow[] }>(
+    "/api/dashboard/retention",
+    currentSite,
+    dateRange ? { from: dateRange.from, to: dateRange.to } : undefined
+  );
 
-    fetch(`/api/dashboard/retention?siteId=${currentSite}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.cohorts) setCohorts(data.cohorts);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Error fetching cohorts:", err);
-        setLoading(false);
-      });
-  }, [currentSite]);
+  const cohorts = data?.cohorts || [];
 
   // Restructure the flat query results into a matrix
   // rows: cohortWeeks, cols: week numbers

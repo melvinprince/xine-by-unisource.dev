@@ -5,8 +5,8 @@
 // ============================================================
 
 import { db } from "./db";
-import { pageviews, events, sites } from "./db/schema";
-import { eq, gte, lte, ne, desc, sql, and, count } from "drizzle-orm";
+import { pageviews, events, sites, sessions } from "./db/schema";
+import { eq, gte, lte, ne, desc, sql, and } from "drizzle-orm";
 import { format, subDays, differenceInDays } from "date-fns";
 import type {
   Site,
@@ -73,56 +73,49 @@ export async function getOverviewStats(
 ): Promise<OverviewStats> {
   const prevRange = getPreviousDateRange(dateRange);
 
-  // Current period
-  const currentRows = await db
+  const statsQuery = (range: DateRange) => db
     .select({
-      visitor_id: pageviews.visitor_id,
-      session_id: pageviews.session_id,
-      duration: pageviews.duration,
+      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
+      pageviewCount: sql<number>`COUNT(*)::int`,
+      avgDuration: sql<number>`COALESCE(AVG(${pageviews.duration}), 0)::float`,
     })
     .from(pageviews)
-    .where(buildFilters(siteId, dateRange, pageviews));
+    .where(buildFilters(siteId, range, pageviews));
 
-  // Previous period
-  const prevRows = await db
-    .select({
-      visitor_id: pageviews.visitor_id,
-      session_id: pageviews.session_id,
-      duration: pageviews.duration,
+  const bounceQuery = (range: DateRange) => {
+    const sub = db.select({
+      cnt: sql<number>`COUNT(*)::int`,
     })
     .from(pageviews)
-    .where(buildFilters(siteId, prevRange, pageviews));
+    .where(buildFilters(siteId, range, pageviews))
+    .groupBy(pageviews.session_id)
+    .as('sub');
 
-  // Unique visitors
-  const visitors = new Set(currentRows.map((r) => r.visitor_id)).size;
-  const prevVisitors = new Set(prevRows.map((r) => r.visitor_id)).size;
+    return db
+      .select({
+        bounceRate: sql<number>`COALESCE(
+          COUNT(*) FILTER (WHERE ${sub.cnt} = 1)::float / NULLIF(COUNT(*), 0) * 100,
+          0
+        )::float`,
+      })
+      .from(sub);
+  };
 
-  // Total pageviews
-  const pageviewCount = currentRows.length;
-  const prevPageviewCount = prevRows.length;
+  const [[current], [prev], [currentBounce], [prevBounce]] = await Promise.all([
+    statsQuery(dateRange),
+    statsQuery(prevRange),
+    bounceQuery(dateRange),
+    bounceQuery(prevRange),
+  ]);
 
-  // Avg duration
-  const totalDuration = currentRows.reduce((sum, r) => sum + (r.duration || 0), 0);
-  const avgDuration = currentRows.length > 0 ? Math.round(totalDuration / currentRows.length) : 0;
-  const prevTotalDuration = prevRows.reduce((sum, r) => sum + (r.duration || 0), 0);
-  const prevAvgDuration = prevRows.length > 0 ? Math.round(prevTotalDuration / prevRows.length) : 0;
-
-  // Bounce rate: sessions with only 1 pageview / total sessions
-  const sessionCounts = new Map<string, number>();
-  currentRows.forEach((r) => {
-    sessionCounts.set(r.session_id, (sessionCounts.get(r.session_id) || 0) + 1);
-  });
-  const totalSessions = sessionCounts.size;
-  const bouncedSessions = Array.from(sessionCounts.values()).filter((c) => c === 1).length;
-  const bounceRate = totalSessions > 0 ? Math.round((bouncedSessions / totalSessions) * 100) : 0;
-
-  const prevSessionCounts = new Map<string, number>();
-  prevRows.forEach((r) => {
-    prevSessionCounts.set(r.session_id, (prevSessionCounts.get(r.session_id) || 0) + 1);
-  });
-  const prevTotalSessions = prevSessionCounts.size;
-  const prevBouncedSessions = Array.from(prevSessionCounts.values()).filter((c) => c === 1).length;
-  const prevBounceRate = prevTotalSessions > 0 ? Math.round((prevBouncedSessions / prevTotalSessions) * 100) : 0;
+  const visitors = current.visitors || 0;
+  const prevVisitors = prev.visitors || 0;
+  const pageviewCount = current.pageviewCount || 0;
+  const prevPageviewCount = prev.pageviewCount || 0;
+  const avgDuration = Math.round(current.avgDuration || 0);
+  const prevAvgDuration = Math.round(prev.avgDuration || 0);
+  const bounceRate = Math.round(currentBounce.bounceRate || 0);
+  const prevBounceRate = Math.round(prevBounce.bounceRate || 0);
 
   return {
     visitors,
@@ -143,39 +136,23 @@ export async function getVisitorTimeseries(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<TimeseriesPoint[]> {
+  const daysDiff = differenceInDays(dateRange.to, dateRange.from);
+  const bucket = daysDiff <= 2 ? 'hour' : 'day';
+  const truncatedDate = sql`DATE_TRUNC(${bucket}, ${pageviews.created_at})`;
+  const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
+
   const rows = await db
     .select({
-      visitor_id: pageviews.visitor_id,
-      created_at: pageviews.created_at,
+      date: sql<string>`to_char(${truncatedDate}, ${dateFormat})`,
+      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
+      pageviews: sql<number>`COUNT(*)::int`,
     })
     .from(pageviews)
     .where(buildFilters(siteId, dateRange, pageviews))
-    .orderBy(pageviews.created_at);
+    .groupBy(truncatedDate)
+    .orderBy(truncatedDate);
 
-  if (rows.length === 0) return [];
-
-  // Dynamic bucketing: hourly for short ranges, daily otherwise
-  const isHourly = differenceInDays(dateRange.to, dateRange.from) <= 2;
-  const dateFormatStr = isHourly ? "yyyy-MM-dd HH:00" : "yyyy-MM-dd";
-
-  // Group by date/hour
-  const dateMap = new Map<string, { visitors: Set<string>; pageviews: number }>();
-
-  rows.forEach((row) => {
-    const date = format(new Date(row.created_at), dateFormatStr);
-    if (!dateMap.has(date)) {
-      dateMap.set(date, { visitors: new Set(), pageviews: 0 });
-    }
-    const entry = dateMap.get(date)!;
-    entry.visitors.add(row.visitor_id);
-    entry.pageviews += 1;
-  });
-
-  return Array.from(dateMap.entries()).map(([date, entry]) => ({
-    date,
-    visitors: entry.visitors.size,
-    pageviews: entry.pageviews,
-  }));
+  return rows;
 }
 
 /**
@@ -189,39 +166,17 @@ export async function getTopPages(
   const rows = await db
     .select({
       url: pageviews.url,
-      visitor_id: pageviews.visitor_id,
-      duration: pageviews.duration,
+      views: sql<number>`COUNT(*)::int`,
+      uniqueVisitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
+      avgDuration: sql<number>`COALESCE(ROUND(AVG(${pageviews.duration})), 0)::int`,
     })
     .from(pageviews)
-    .where(buildFilters(siteId, dateRange, pageviews));
+    .where(buildFilters(siteId, dateRange, pageviews))
+    .groupBy(pageviews.url)
+    .orderBy(sql`COUNT(*) DESC`)
+    .limit(limit);
 
-  if (rows.length === 0) return [];
-
-  // Aggregate by URL
-  const urlMap = new Map<
-    string,
-    { views: number; visitors: Set<string>; totalDuration: number }
-  >();
-
-  rows.forEach((row) => {
-    if (!urlMap.has(row.url)) {
-      urlMap.set(row.url, { views: 0, visitors: new Set(), totalDuration: 0 });
-    }
-    const entry = urlMap.get(row.url)!;
-    entry.views += 1;
-    entry.visitors.add(row.visitor_id);
-    entry.totalDuration += row.duration || 0;
-  });
-
-  return Array.from(urlMap.entries())
-    .map(([url, entry]) => ({
-      url,
-      views: entry.views,
-      uniqueVisitors: entry.visitors.size,
-      avgDuration: entry.views > 0 ? Math.round(entry.totalDuration / entry.views) : 0,
-    }))
-    .sort((a, b) => b.views - a.views)
-    .slice(0, limit);
+  return rows;
 }
 
 /**
@@ -233,39 +188,40 @@ export async function getTopSources(
   limit = 10
 ): Promise<TopSource[]> {
   const filters = buildFilters(siteId, dateRange, pageviews);
+
+  const extractedHost = sql<string>`
+    CASE 
+      WHEN ${pageviews.referrer} ~ '^https?://' 
+      THEN regexp_replace(${pageviews.referrer}, '^https?://([^/]+).*$', '\\1')
+      ELSE ${pageviews.referrer}
+    END
+  `;
+
   const rows = await db
     .select({
-      referrer: pageviews.referrer,
-      visitor_id: pageviews.visitor_id,
+      source: extractedHost,
+      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
     })
     .from(pageviews)
-    .where(and(filters, ne(pageviews.referrer, "")));
+    .where(and(filters, ne(pageviews.referrer, "")))
+    .groupBy(extractedHost)
+    .orderBy(sql`COUNT(DISTINCT ${pageviews.visitor_id}) DESC`)
+    .limit(limit);
 
-  if (rows.length === 0) return [];
+  const totalVisitorsRow = await db
+    .select({
+      total: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
+    })
+    .from(pageviews)
+    .where(buildFilters(siteId, dateRange, pageviews));
 
-  const refMap = new Map<string, Set<string>>();
-  rows.forEach((row) => {
-    // Normalize referrer to domain only
-    let domain = row.referrer || "";
-    try {
-      domain = new URL(domain).hostname;
-    } catch {
-      // Use as-is if not a valid URL
-    }
-    if (!refMap.has(domain)) refMap.set(domain, new Set());
-    refMap.get(domain)!.add(row.visitor_id);
-  });
+  const total = totalVisitorsRow[0]?.total || 0;
 
-  const totalVisitors = new Set(rows.map((r) => r.visitor_id)).size;
-
-  return Array.from(refMap.entries())
-    .map(([referrer, visitors]) => ({
-      referrer,
-      visitors: visitors.size,
-      percentage: totalVisitors > 0 ? Math.round((visitors.size / totalVisitors) * 100) : 0,
-    }))
-    .sort((a, b) => b.visitors - a.visitors)
-    .slice(0, limit);
+  return rows.map((r) => ({
+    referrer: r.source,
+    visitors: r.visitors,
+    percentage: total > 0 ? Math.round((r.visitors / total) * 100) : 0,
+  }));
 }
 
 /**
@@ -276,18 +232,22 @@ export async function getDeviceBreakdown(
   dateRange: DateRange
 ): Promise<DeviceBreakdown> {
   const rows = await db
-    .select({ device: pageviews.device })
+    .select({
+      device: sql<string>`LOWER(COALESCE(${pageviews.device}, 'desktop'))`,
+      count: sql<number>`COUNT(*)::int`,
+    })
     .from(pageviews)
-    .where(buildFilters(siteId, dateRange, pageviews));
-
-  if (!rows) return { desktop: 0, mobile: 0, tablet: 0 };
+    .where(buildFilters(siteId, dateRange, pageviews))
+    .groupBy(sql`LOWER(COALESCE(${pageviews.device}, 'desktop'))`);
 
   const breakdown: DeviceBreakdown = { desktop: 0, mobile: 0, tablet: 0 };
   rows.forEach((row) => {
-    const device = (row.device || "desktop").toLowerCase();
-    if (device === "mobile") breakdown.mobile += 1;
-    else if (device === "tablet") breakdown.tablet += 1;
-    else breakdown.desktop += 1;
+    const dev = row.device as keyof DeviceBreakdown;
+    if (dev === "mobile" || dev === "tablet" || dev === "desktop") {
+      breakdown[dev] = row.count;
+    } else {
+      breakdown.desktop += row.count;
+    }
   });
 
   return breakdown;
@@ -302,22 +262,17 @@ export async function getBrowserBreakdown(
   limit = 8
 ): Promise<BrowserStat[]> {
   const rows = await db
-    .select({ browser: pageviews.browser })
+    .select({
+      browser: sql<string>`COALESCE(${pageviews.browser}, 'Unknown')`,
+      count: sql<number>`COUNT(*)::int`,
+    })
     .from(pageviews)
-    .where(buildFilters(siteId, dateRange, pageviews));
+    .where(buildFilters(siteId, dateRange, pageviews))
+    .groupBy(sql`COALESCE(${pageviews.browser}, 'Unknown')`)
+    .orderBy(sql`COUNT(*) DESC`)
+    .limit(limit);
 
-  if (!rows) return [];
-
-  const browserMap = new Map<string, number>();
-  rows.forEach((row) => {
-    const browser = row.browser || "Unknown";
-    browserMap.set(browser, (browserMap.get(browser) || 0) + 1);
-  });
-
-  return Array.from(browserMap.entries())
-    .map(([browser, count]) => ({ browser, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit);
+  return rows;
 }
 
 /**
@@ -332,28 +287,19 @@ export async function getCountryBreakdown(
   const rows = await db
     .select({
       country: pageviews.country,
-      visitor_id: pageviews.visitor_id,
+      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
     })
     .from(pageviews)
-    .where(and(filters, ne(pageviews.country, "")));
+    .where(and(filters, ne(pageviews.country, "")))
+    .groupBy(pageviews.country)
+    .orderBy(sql`COUNT(DISTINCT ${pageviews.visitor_id}) DESC`)
+    .limit(limit);
 
-  if (!rows) return [];
-
-  const countryMap = new Map<string, Set<string>>();
-  rows.forEach((row) => {
-    const country = row.country || "Unknown";
-    if (!countryMap.has(country)) countryMap.set(country, new Set());
-    countryMap.get(country)!.add(row.visitor_id);
-  });
-
-  return Array.from(countryMap.entries())
-    .map(([country, visitors]) => ({
-      country,
-      visitors: visitors.size,
-      flag: countryFlag(country),
-    }))
-    .sort((a, b) => b.visitors - a.visitors)
-    .slice(0, limit);
+  return rows.map((r) => ({
+    country: r.country || "Unknown",
+    visitors: r.visitors,
+    flag: countryFlag(r.country || ""),
+  }));
 }
 
 /**
@@ -367,35 +313,16 @@ export async function getTopEvents(
   const rows = await db
     .select({
       name: events.name,
-      created_at: events.created_at,
+      count: sql<number>`COUNT(*)::int`,
+      lastTriggered: sql<string>`to_char(MAX(${events.created_at}), 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
     })
     .from(events)
-    .where(buildFilters(siteId, dateRange, events));
+    .where(buildFilters(siteId, dateRange, events))
+    .groupBy(events.name)
+    .orderBy(sql`COUNT(*) DESC`)
+    .limit(limit);
 
-  if (!rows) return [];
-
-  const eventMap = new Map<string, { count: number; lastTriggered: string }>();
-  rows.forEach((row) => {
-    const ts = new Date(row.created_at).toISOString();
-    const existing = eventMap.get(row.name);
-    if (!existing) {
-      eventMap.set(row.name, { count: 1, lastTriggered: ts });
-    } else {
-      existing.count += 1;
-      if (ts > existing.lastTriggered) {
-        existing.lastTriggered = ts;
-      }
-    }
-  });
-
-  return Array.from(eventMap.entries())
-    .map(([name, entry]) => ({
-      name,
-      count: entry.count,
-      lastTriggered: entry.lastTriggered,
-    }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit);
+  return rows;
 }
 
 /**

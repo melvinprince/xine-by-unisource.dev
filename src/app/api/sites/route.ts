@@ -4,6 +4,8 @@ import { sites } from "@/lib/db/schema";
 import { desc } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
+import { validateOrThrow, createSiteSchema, ValidationError } from "@/lib/validation";
+
 /**
  * GET /api/sites — List all tracked sites.
  */
@@ -39,14 +41,8 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, domain } = body;
-
-    if (!name || !domain) {
-      return NextResponse.json(
-        { error: "Name and domain are required" },
-        { status: 400 }
-      );
-    }
+    const validated = validateOrThrow(createSiteSchema, body);
+    const { name, domain } = validated;
 
     // Clean domain (remove protocol if provided)
     const cleanDomain = domain
@@ -75,6 +71,9 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error: unknown) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     // Handle duplicate domain
     const pgError = error as { code?: string };
     if (pgError.code === "23505") {

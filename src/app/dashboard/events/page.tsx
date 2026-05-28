@@ -13,11 +13,26 @@ import VisitorChart from '@/components/charts/VisitorChart';
 
 gsap.registerPlugin(useGSAP);
 
+import { useDashboardFetch } from '@/hooks/use-dashboard-data';
+
+interface EventTopItem {
+  name: string;
+  count: number;
+  uniqueUsers: number;
+}
+
+interface EventTimeseriesPoint {
+  date: string;
+  count: number;
+}
+
 export default function EventsPage() {
   const { selectedSite, dateRange } = useDashboardContext();
-  const [data, setData] = useState<{ topEvents: any[]; timeseries: any[] } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, refetch } = useDashboardFetch<{ topEvents: EventTopItem[]; timeseries: EventTimeseriesPoint[] }>(
+    '/api/dashboard/events',
+    selectedSite,
+    dateRange
+  );
 
   const pageRef = useRef<HTMLDivElement>(null);
 
@@ -28,39 +43,20 @@ export default function EventsPage() {
     }
   }, [loading, error, data]);
 
-  const fetchData = async () => {
-    if (selectedSite === 'all') return;
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/dashboard/events?siteId=${selectedSite}&from=${dateRange.from}&to=${dateRange.to}`);
-      if (!res.ok) throw new Error('Failed to load events data');
-      const json = await res.json();
-      setData(json);
-      setError(null);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, [selectedSite, dateRange]);
-
   const handleExport = () => {
     if (!data?.topEvents.length) return;
-    const csvContent = "data:text/csv;charset=utf-8,"
-      + "Event Name,Total Count,Unique Users\n"
+    const csvContent = "Event Name,Total Count,Unique Users\n"
       + data.topEvents.map(e => `"${e.name}",${e.count},${e.uniqueUsers}`).join("\n");
 
-    const encodedUri = encodeURI(csvContent);
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", url);
     link.setAttribute("download", `events_${selectedSite}_${dateRange.from}_to_${dateRange.to}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   if (selectedSite === 'all') {
@@ -97,7 +93,7 @@ export default function EventsPage() {
       {loading ? (
         <LoadingState message="Loading Events Data..." />
       ) : error ? (
-        <ErrorState message={error} onRetry={fetchData} />
+        <ErrorState message={error} onRetry={refetch} />
       ) : !data || data.topEvents.length === 0 ? (
         <div className="glass-card" style={{ padding: '4rem 2rem', textAlign: 'center' }}>
           <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--color-bg-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem', border: '1px solid var(--color-border-subtle)' }}>
@@ -173,7 +169,7 @@ export default function EventsPage() {
             }
             primaryDataKey="count"
             primaryLabel="Events Fired"
-            data={data.timeseries.map(t => ({ date: t.date, count: t.count, pageviews: 0, sessions: 0 })) as any}
+            data={data.timeseries.map(t => ({ date: t.date, count: t.count, pageviews: 0 })) as unknown as import('@/lib/types').TimeseriesPoint[]}
           />
 
           {/* Top Events Table */}

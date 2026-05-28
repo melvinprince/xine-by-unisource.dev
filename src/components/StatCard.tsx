@@ -12,6 +12,7 @@ interface StatCardProps {
   icon: React.ReactNode;
   delay?: number;
   suffix?: string;
+  invertTrend?: boolean;
 }
 
 function formatValue(value: number, format: string): string {
@@ -40,6 +41,7 @@ export default function StatCard({
   icon,
   delay = 0,
   suffix,
+  invertTrend = false,
 }: StatCardProps) {
   const valueRef = useRef<HTMLSpanElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -82,12 +84,9 @@ export default function StatCard({
   }, [value, format, delay]);
 
   const isPositive = (change ?? 0) >= 0;
-  const changeColor = label === 'Bounce Rate'
-    ? ((change ?? 0) <= 0 ? 'var(--color-success)' : 'var(--color-danger)')
-    : (isPositive ? 'var(--color-success)' : 'var(--color-danger)');
-  const changeBg = label === 'Bounce Rate'
-    ? ((change ?? 0) <= 0 ? 'var(--color-success-subtle)' : 'var(--color-danger-subtle)')
-    : (isPositive ? 'var(--color-success-subtle)' : 'var(--color-danger-subtle)');
+  const isGood = invertTrend ? !isPositive : isPositive;
+  const changeColor = isGood ? 'var(--color-success)' : 'var(--color-danger)';
+  const changeBg = isGood ? 'var(--color-success-subtle)' : 'var(--color-danger-subtle)';
 
   return (
     <div
@@ -137,7 +136,7 @@ export default function StatCard({
               fontWeight: 600,
             }}
           >
-            {(label === 'Bounce Rate' ? (change ?? 0) <= 0 : isPositive) ? (
+            {isPositive ? (
               <TrendingUp size={12} />
             ) : (
               <TrendingDown size={12} />
@@ -148,17 +147,24 @@ export default function StatCard({
       </div>
 
       {/* Value */}
-      <span
-        ref={valueRef}
-        style={{
-          fontSize: '2rem',
-          fontWeight: 700,
-          color: 'var(--color-text-primary)',
-          lineHeight: 1.1,
-        }}
-      >
-        0
-      </span>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.25rem' }}>
+        <span
+          ref={valueRef}
+          style={{
+            fontSize: '2rem',
+            fontWeight: 700,
+            color: 'var(--color-text-primary)',
+            lineHeight: 1.1,
+          }}
+        >
+          0
+        </span>
+        {suffix && (
+          <span style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+            {suffix}
+          </span>
+        )}
+      </div>
 
       {/* Label */}
       <span

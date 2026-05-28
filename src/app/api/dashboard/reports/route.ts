@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { emailReports, sites } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { validateOrThrow, createReportSchema, siteIdSchema, ValidationError } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const siteId = searchParams.get("siteId");
+    const rawSiteId = searchParams.get("siteId");
 
-    if (!siteId) return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
+    if (!rawSiteId) return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
+
+    const siteId = validateOrThrow(siteIdSchema, rawSiteId);
 
     if (siteId !== "all") {
       const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
@@ -23,6 +26,9 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({ reports });
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("[reports] GET Error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -31,23 +37,22 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { siteId, schedule, recipients } = body;
+    const validated = validateOrThrow(createReportSchema, body);
 
-    if (!siteId || !schedule || !recipients || !Array.isArray(recipients)) {
-      return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
-    }
-
-    const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
+    const site = await db.query.sites.findFirst({ where: eq(sites.id, validated.siteId) });
     if (!site) return NextResponse.json({ error: "Site not found" }, { status: 404 });
 
     const newReport = await db.insert(emailReports).values({
-      site_id: siteId,
-      schedule,
-      recipients,
+      site_id: validated.siteId,
+      schedule: validated.schedule,
+      recipients: validated.recipients,
     }).returning();
 
     return NextResponse.json(newReport[0], { status: 201 });
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("[reports] POST Error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

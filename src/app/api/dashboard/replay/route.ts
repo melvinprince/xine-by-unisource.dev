@@ -2,23 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { replayEvents, sites } from "@/lib/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
+import { verifySiteExists, siteNotFoundResponse } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   try {
-
     const { searchParams } = new URL(request.url);
-    const siteId = searchParams.get("siteId");
+    const siteId = searchParams.get("siteId") || "all";
 
-    if (!siteId) {
-      return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
-    }
-
-    if (siteId !== "all") {
-      const site = await db.query.sites.findFirst({
-        where: eq(sites.id, siteId),
-      });
-      if (!site) { return NextResponse.json({ error: "Site not found" }, { status: 404 }); }
-    }
+    // Verify Site UUID exists in database (or is "all")
+    const exists = await verifySiteExists(siteId);
+    if (!exists) return siteNotFoundResponse();
 
     let replaysQuery = db
       .select({
@@ -30,6 +23,7 @@ export async function GET(request: NextRequest) {
       .from(replayEvents);
       
     if (siteId !== "all") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       replaysQuery = replaysQuery.where(eq(replayEvents.site_id, siteId)) as any;
     }
 

@@ -19,7 +19,7 @@ export async function GET(
   to.setHours(23, 59, 59, 999);
 
   try {
-    let rawData: any[] = [];
+    let rawData: Record<string, unknown>[] = [];
 
     if (type === "events") {
       rawData = await db.select().from(events)

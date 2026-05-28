@@ -2,13 +2,15 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { annotations } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
+import { validateOrThrow, createAnnotationSchema, uuidSchema, ValidationError } from "@/lib/validation";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ siteId: string }> }
 ) {
   try {
-    const { siteId } = await params;
+    const rawParams = await params;
+    const siteId = validateOrThrow(uuidSchema, rawParams.siteId);
     const data = await db
       .select()
       .from(annotations)
@@ -17,6 +19,9 @@ export async function GET(
 
     return NextResponse.json(data);
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("GET annotations error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
@@ -27,21 +32,26 @@ export async function POST(
   { params }: { params: Promise<{ siteId: string }> }
 ) {
   try {
-    const { siteId } = await params;
+    const rawParams = await params;
+    const siteId = validateOrThrow(uuidSchema, rawParams.siteId);
     const body = await request.json();
+    const validated = validateOrThrow(createAnnotationSchema, body);
 
     const result = await db
       .insert(annotations)
       .values({
         site_id: siteId,
-        text: body.text,
-        date: new Date(body.date),
-        category: body.category || "note",
+        text: validated.text,
+        date: new Date(validated.date),
+        category: validated.category || "note",
       })
       .returning();
 
     return NextResponse.json(result[0]);
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("POST annotations error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }

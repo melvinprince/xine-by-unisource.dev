@@ -2,20 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { events } from "@/lib/db/schema";
 import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const siteId = searchParams.get("siteId");
+  const siteId = searchParams.get("siteId") || "all";
   const fromStr = searchParams.get("from");
   const toStr = searchParams.get("to");
 
-  if (!siteId) return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
+  // 1. Verify Site UUID exists in database (or is "all")
+  const exists = await verifySiteExists(siteId);
+  if (!exists) return siteNotFoundResponse();
 
-  const to = toStr ? new Date(toStr) : new Date();
-  const from = fromStr ? new Date(fromStr) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  if (toStr && !toStr.includes('T')) {
-    to.setHours(23, 59, 59, 999);
-  }
+  // 2. Safely parse and validate date range
+  const dateRange = parseDateRange(fromStr, toStr);
+  if (!dateRange) return invalidDateResponse();
+
+  const { from, to } = dateRange;
 
   try {
     const topEvents = await db
@@ -27,7 +30,7 @@ export async function GET(request: NextRequest) {
       .from(events)
       .where(
         and(
-          eq(events.site_id, siteId),
+          siteId === "all" ? sql`1=1` : eq(events.site_id, siteId),
           gte(events.created_at, from),
           lte(events.created_at, to)
         )
@@ -45,7 +48,7 @@ export async function GET(request: NextRequest) {
       .from(events)
       .where(
         and(
-          eq(events.site_id, siteId),
+          siteId === "all" ? sql`1=1` : eq(events.site_id, siteId),
           gte(events.created_at, from),
           lte(events.created_at, to)
         )

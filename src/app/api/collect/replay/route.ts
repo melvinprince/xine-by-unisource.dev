@@ -24,6 +24,21 @@ export async function OPTIONS(request: NextRequest) {
   return new NextResponse(null, { status: 204, headers: getHeaders(request) });
 }
 
+function sanitizeReplayEvents(events: unknown[]): unknown[] {
+  return events.map((event) => {
+    if (typeof event === "object" && event !== null) {
+      const e = event as Record<string, unknown>;
+      if (typeof e.html === "string") {
+        e.html = e.html
+          .replace(/type=["'](password|credit)[^>]*value=["'][^"']*/gi, 'type="$1" value="[REDACTED]"')
+          .replace(/\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g, "[CARD-REDACTED]")
+          .replace(/\b\d{3}-\d{2}-\d{4}\b/g, "[SSN-REDACTED]");
+      }
+    }
+    return event;
+  });
+}
+
 export async function POST(request: NextRequest) {
   const headers = getHeaders(request);
 
@@ -78,13 +93,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const sanitizedEvents = sanitizeReplayEvents(truncatedEvents);
+
     // Fire-and-forget insert
     db.insert(replayEvents)
       .values({
         site_id: siteId,
         session_id: typeof session_id === "string" ? session_id.slice(0, 128) : "",
         url: typeof url === "string" ? url.slice(0, 4096) : "",
-        events: truncatedEvents,
+        events: sanitizedEvents,
       })
       .catch((err) => {
         console.error("[collect/replay] bg insert error", err);

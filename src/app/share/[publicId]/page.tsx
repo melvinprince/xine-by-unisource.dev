@@ -14,15 +14,28 @@ import { formatDuration } from "@/lib/utils";
 export default function PublicSharePage() {
   const params = useParams();
   const siteId = params.publicId as string;
-  const [data, setData] = useState<any>(null);
+  interface PublicDashboardData {
+    site: { id: string; name: string; domain: string };
+    stats: import('@/lib/types').OverviewStats;
+    timeseries: import('@/lib/types').TimeseriesPoint[];
+    annotations?: { id: string; text: string; date: string; category: string }[];
+    topPages: import('@/lib/types').TopPage[];
+    topSources: import('@/lib/types').TopSource[];
+    deviceBreakdown: import('@/lib/types').DeviceBreakdown;
+    browserStats: import('@/lib/types').BrowserStat[];
+    locations: import('@/lib/types').CountryStat[];
+  }
+
+  const [data, setData] = useState<PublicDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState("30d");
 
   useEffect(() => {
     if (!siteId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
-    fetch(`/api/public/overview?siteId=\${siteId}&range=\${range}`)
+    fetch(`/api/public/overview?siteId=${siteId}&range=${range}`)
       .then((res) => res.json())
       .then((resData) => {
         if (resData.error) {

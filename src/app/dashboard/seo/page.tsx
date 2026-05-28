@@ -1,41 +1,32 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Search, MapPin, BarChart3, TrendingUp, TrendingDown } from "lucide-react";
+import { Search, BarChart3 } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import VisitorChart from "@/components/charts/VisitorChart";
 import DataTable from "@/components/DataTable";
 import HelpTooltip from "@/components/HelpTooltip";
 import { LoadingState, EmptyState, ErrorState } from "@/components/DataStates";
 import { useDashboardContext } from "@/components/DashboardContext";
+import { useDashboardFetch } from "@/hooks/use-dashboard-data";
+
+interface SEOData {
+  organicVisitors: number;
+  organicPageviews: number;
+  timeseries: import('@/lib/types').TimeseriesPoint[];
+  topEngines: { engine: string; visitors: number; views: number }[];
+  topLandingPages: { url: string; visitors: number }[];
+}
 
 export default function SEOOverviewPage() {
   const { selectedSite, dateRange } = useDashboardContext();
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/dashboard/seo?siteId=${selectedSite}&range=${new Date(dateRange.from).getTime()}-${new Date(dateRange.to).getTime()}`)
-      .then((res) => res.json())
-      .then((resData) => {
-        if (resData.error) {
-          setError(resData.error);
-        } else {
-          setData(resData);
-        }
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error(err);
-        setError("Failed to load SEO overview");
-        setLoading(false);
-      });
-  }, [selectedSite, dateRange]);
+  const { data, loading, error, refetch } = useDashboardFetch<SEOData>(
+    "/api/dashboard/seo",
+    selectedSite,
+    dateRange
+  );
 
   if (loading) return <LoadingState message="Analyzing search traffic..." />;
-  if (error) return <ErrorState message={error} onRetry={() => window.location.reload()} />;
+  if (error) return <ErrorState message={error} onRetry={refetch} />;
   
   const hasData = data && (data.organicPageviews > 0 || data.organicVisitors > 0);
   
@@ -48,11 +39,11 @@ export default function SEOOverviewPage() {
   );
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 className="text-2xl font-bold tracking-tight">SEO Overview <HelpTooltip title="SEO Overview" content="Analyze organic traffic from search engines. Tracks visitors arriving from Google, Bing, Yahoo, DuckDuckGo and other search engines." /></h1>
-          <p className="text-slate-400">Analyze organic traffic performance and discoverability.</p>
+          <p style={{ color: 'var(--color-text-secondary)' }}>Analyze organic traffic performance and discoverability.</p>
         </div>
       </div>
 

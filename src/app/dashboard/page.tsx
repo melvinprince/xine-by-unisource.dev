@@ -23,7 +23,12 @@ export default function DashboardPage() {
   useEffect(() => {
     const saved = localStorage.getItem('dashboard_hidden_widgets');
     if (saved) {
-      try { setHiddenWidgets(JSON.parse(saved)); } catch(e){}
+      try {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setHiddenWidgets(JSON.parse(saved));
+      } catch {
+        // Ignore error
+      }
     }
   }, []);
 
@@ -115,6 +120,7 @@ export default function DashboardPage() {
             format="percent"
             icon={<ArrowDownUp size={20} />}
             delay={0.25}
+            invertTrend={true}
           />
         </div>
       )}

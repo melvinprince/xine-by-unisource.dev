@@ -53,16 +53,6 @@ export default function DateRangePicker({ onChange }: DateRangePickerProps) {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        closeMenu();
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
   const openMenu = () => {
     setIsOpen(true);
     requestAnimationFrame(() => {
@@ -96,6 +86,16 @@ export default function DateRangePicker({ onChange }: DateRangePickerProps) {
       setIsOpen(false);
     }
   };
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        closeMenu();
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
 
   const selectPreset = (preset: (typeof presets)[0]) => {
     setSelected(preset.label);

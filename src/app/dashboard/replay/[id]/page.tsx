@@ -11,7 +11,15 @@ export default function SessionReplayViewer() {
   const sessionId = params.id as string;
   const { selectedSite: currentSite } = useDashboardContext();
   
-  const [events, setEvents] = useState<any[]>([]);
+  interface ReplayEvent {
+    time: number;
+    type: string;
+    html?: string;
+    x?: number;
+    y?: number;
+  }
+
+  const [events, setEvents] = useState<ReplayEvent[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [isPlaying, setIsPlaying] = useState(false);
@@ -31,7 +39,7 @@ export default function SessionReplayViewer() {
       .then(data => {
         if (data.events && data.events.length > 0) {
           // Flatten chunks of events
-          const allEvents = data.events.flatMap((r: any) => r.events).sort((a: any, b: any) => a.time - b.time);
+          const allEvents = data.events.flatMap((r: { events: ReplayEvent[] }) => r.events).sort((a: ReplayEvent, b: ReplayEvent) => a.time - b.time);
           setEvents(allEvents);
           if (allEvents.length > 0) {
             const firstT = allEvents[0].time;
@@ -40,9 +48,9 @@ export default function SessionReplayViewer() {
             baseEventTime.current = firstT;
 
             // Load snapshot
-            const snapshot = allEvents.find((e: any) => e.type === "snapshot");
+            const snapshot = allEvents.find((e: ReplayEvent) => e.type === "snapshot");
             if (snapshot && iframeRef.current) {
-               iframeRef.current.srcdoc = snapshot.html;
+               iframeRef.current.srcdoc = snapshot.html || "";
             }
           }
         }
@@ -56,6 +64,7 @@ export default function SessionReplayViewer() {
       if (rAF.current) cancelAnimationFrame(rAF.current);
     } else {
       setIsPlaying(true);
+      // eslint-disable-next-line react-hooks/purity
       playStartTime.current = performance.now() - currentTimeOffset;
       tick();
     }
@@ -69,6 +78,7 @@ export default function SessionReplayViewer() {
   };
 
   const tick = () => {
+    // eslint-disable-next-line react-hooks/purity
     const elapsed = performance.now() - playStartTime.current;
     if (elapsed >= duration) {
       setCurrentTimeOffset(duration);
@@ -100,7 +110,7 @@ export default function SessionReplayViewer() {
     }
     
     if (lastScroll && iframeRef.current && iframeRef.current.contentWindow) {
-      iframeRef.current.contentWindow.scrollTo(lastScroll.x, lastScroll.y);
+      iframeRef.current.contentWindow.scrollTo(lastScroll.x ?? 0, lastScroll.y ?? 0);
     }
   };
 

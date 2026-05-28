@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { Tag, Plus, Trash2, X } from 'lucide-react';
@@ -41,7 +41,7 @@ export default function AnnotationsPage() {
     }
   }, [loading, error, annotations.length]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (selectedSite === 'all') return;
     setLoading(true);
     try {
@@ -50,16 +50,16 @@ export default function AnnotationsPage() {
       const data = await res.json();
       setAnnotations(data);
       setError(null);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load annotations');
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedSite]);
 
   useEffect(() => {
     fetchData();
-  }, [selectedSite]);
+  }, [fetchData]);
 
   const openModal = () => {
     setShowAdd(true);

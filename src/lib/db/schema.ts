@@ -54,6 +54,7 @@ export const pageviews = pgTable(
     index("idx_pageviews_created_at").on(table.created_at),
     index("idx_pageviews_visitor_id").on(table.visitor_id),
     index("idx_pageviews_session_url").on(table.session_id, table.url),
+    index("idx_pageviews_connection_type").on(table.connection_type),
   ]
 );
 
@@ -72,12 +73,14 @@ export const events = pgTable(
     visitor_id: text("visitor_id").notNull(),
     session_id: text("session_id").notNull(),
     url: text("url"),
+    is_bot: boolean("is_bot").default(false),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("idx_events_site_id").on(table.site_id),
     index("idx_events_created_at").on(table.created_at),
     index("idx_events_name").on(table.name),
+    index("idx_events_site_name_idx").on(table.site_id, table.name),
   ]
 );
 
@@ -120,6 +123,7 @@ export const sessions = pgTable(
     index("idx_sessions_visitor_id").on(table.visitor_id),
     index("idx_sessions_is_bounce").on(table.is_bounce),
     index("idx_sessions_entry_page").on(table.entry_page),
+    index("idx_sessions_site_started_idx").on(table.site_id, table.started_at),
   ]
 );
 
@@ -175,7 +179,7 @@ export const goalConversions = pgTable("goal_conversions", {
   session_id: text("session_id")
     .notNull()
     .references(() => sessions.id, { onDelete: "cascade" }),
-  visitor_id: uuid("visitor_id").notNull(),
+  visitor_id: text("visitor_id").notNull(),
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index("idx_conversions_site_id").on(table.site_id),

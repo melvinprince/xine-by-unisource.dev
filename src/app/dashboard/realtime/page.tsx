@@ -45,6 +45,7 @@ export default function RealtimePage() {
         }
       );
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.activeVisitors]);
 
   if (loading) return <LoadingState message="Connecting to real-time feed..." />;

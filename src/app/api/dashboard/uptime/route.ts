@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { uptimeChecks, sites } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
+import { isPrivateUrl } from "@/lib/ssrf";
+import { validateOrThrow, siteIdSchema, uuidSchema, ValidationError } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const siteId = searchParams.get("siteId");
-    if (!siteId) return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
+    const rawSiteId = searchParams.get("siteId");
+    if (!rawSiteId) return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
+
+    const siteId = validateOrThrow(siteIdSchema, rawSiteId);
 
     if (siteId !== "all") {
       const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
@@ -22,6 +26,9 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({ checks });
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("[uptime] GET Error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -30,12 +37,18 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { siteId, url } = body;
+    const { siteId: rawSiteId, url } = body;
 
-    if (!siteId || !url) return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+    if (!rawSiteId || !url) return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+
+    const siteId = validateOrThrow(uuidSchema, rawSiteId);
 
     const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
     if (!site) return NextResponse.json({ error: "Site not found" }, { status: 404 });
+
+    if (isPrivateUrl(url)) {
+      return NextResponse.json({ error: "URL blocked: private/internal addresses are not allowed" }, { status: 400 });
+    }
 
     // Run an immediate check
     const start = Date.now();
@@ -57,6 +70,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(newCheck[0], { status: 201 });
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("[uptime] POST Error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

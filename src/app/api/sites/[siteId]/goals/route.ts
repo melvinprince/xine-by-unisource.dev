@@ -3,13 +3,15 @@ import { db } from "@/lib/db";
 import { goals } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { clearGoalsCache } from "@/lib/goals-cache";
+import { validateOrThrow, createGoalSchema, uuidSchema, ValidationError } from "@/lib/validation";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ siteId: string }> }
 ) {
   try {
-    const { siteId } = await params;
+    const rawParams = await params;
+    const siteId = validateOrThrow(uuidSchema, rawParams.siteId);
     const data = await db
       .select()
       .from(goals)
@@ -17,6 +19,9 @@ export async function GET(
 
     return NextResponse.json(data);
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("GET goals error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
@@ -27,17 +32,19 @@ export async function POST(
   { params }: { params: Promise<{ siteId: string }> }
 ) {
   try {
-    const { siteId } = await params;
+    const rawParams = await params;
+    const siteId = validateOrThrow(uuidSchema, rawParams.siteId);
     const body = await request.json();
+    const validated = validateOrThrow(createGoalSchema, body);
 
     const result = await db
       .insert(goals)
       .values({
         site_id: siteId,
-        name: body.name,
-        type: body.type,       // 'pageview', 'event', 'duration'
-        condition: body.condition, // 'equals', 'contains', 'starts_with', 'greater_than'
-        target: body.target,
+        name: validated.name,
+        type: validated.type,       // 'pageview', 'event', 'duration'
+        condition: validated.condition, // 'equals', 'contains', 'starts_with', 'greater_than'
+        target: validated.target,
       })
       .returning();
 
@@ -45,6 +52,9 @@ export async function POST(
 
     return NextResponse.json(result[0]);
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("POST goals error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }

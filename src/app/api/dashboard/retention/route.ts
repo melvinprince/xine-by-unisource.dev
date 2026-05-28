@@ -2,37 +2,39 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   try {
-
     const { searchParams } = new URL(request.url);
-    const siteId = searchParams.get("siteId");
+    const siteId = searchParams.get("siteId") || "all";
+    const fromStr = searchParams.get("from");
+    const toStr = searchParams.get("to");
 
-    if (!siteId) {
-      return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
-    }
+    // 1. Verify Site UUID exists in database (or is "all")
+    const exists = await verifySiteExists(siteId);
+    if (!exists) return siteNotFoundResponse();
 
-    if (siteId !== "all") {
-      const site = await db.query.sites.findFirst({
-        where: eq(sites.id, siteId),
-      });
-      if (!site) { return NextResponse.json({ error: "Site not found" }, { status: 404 }); }
-    }
+    // 2. Safely parse and validate date range
+    const dateRange = parseDateRange(fromStr, toStr);
+    if (!dateRange) return invalidDateResponse();
 
-    const siteFilter = siteId === "all" ? sql`` : sql`WHERE site_id = ${siteId}`;
+    const { from, to } = dateRange;
+
+    const siteFilter = siteId === "all" ? sql`` : sql`AND site_id = ${siteId}`;
+    const dateFilter = sql`started_at >= ${from} AND started_at <= ${to}`;
 
     const result = await db.execute(sql`
       WITH Cohorts AS (
         SELECT visitor_id, DATE_TRUNC('week', MIN(started_at)) as cohort_week
         FROM sessions
-        ${siteFilter}
+        WHERE ${dateFilter} ${siteFilter}
         GROUP BY visitor_id
       ),
       Activity AS (
         SELECT visitor_id, DATE_TRUNC('week', started_at) as activity_week
         FROM sessions
-        ${siteFilter}
+        WHERE ${dateFilter} ${siteFilter}
       ),
       CohortSize AS (
         SELECT cohort_week, COUNT(DISTINCT visitor_id) as total_users

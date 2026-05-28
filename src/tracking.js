@@ -1,11 +1,15 @@
 (function () {
   "use strict";
 
+  // Comprehensive bot filter blocking Lighthouse, Googlebot, Ahrefs, headless browsers, and other crawlers
+  var isBot = /bot|googlebot|crawler|spider|robot|crawling|lighthouse|headless|phantomjs|chrome-lighthouse|yandex|bingbot|yahoo|duckduckbot|baiduspider|slurp|ahrefsbot|semrushbot|mj12bot|dotbot/i.test(navigator.userAgent) || navigator.webdriver;
+
   // Prevent tracking bots, data-saver mode, and prerendering
   if (
-    navigator.webdriver ||
+    isBot ||
     (navigator.connection && navigator.connection.saveData) ||
-    document.visibilityState === "prerender"
+    document.visibilityState === "prerender" ||
+    window.location.search.indexOf("no_track=1") !== -1
   ) {
     return;
   }
@@ -109,10 +113,14 @@
       });
     }
 
+    var lastPageviewTime = 0;
     function trackPageview() {
+      var now = Date.now();
+      if (now - lastPageviewTime < 100) return;
       var newUrl = location.pathname + location.search;
       if (newUrl === currentUrl) return;
 
+      lastPageviewTime = now;
       if (currentUrl) sendDuration(currentUrl);
       currentUrl = newUrl;
       pageLoadTime = Date.now();
@@ -184,6 +192,39 @@
       sendDuration(currentUrl);
     });
 
+    // Progressive heartbeat for accurate time-on-page
+    // Fires at 5s, 15s, 30s after each page load. This captures real duration
+    // even when beforeunload is blocked by ad-blockers, and naturally separates
+    // human traffic (reaches 5s+) from bots (0-1s bounce).
+    var heartbeatTimers = [];
+    var heartbeatIntervals = [5, 15, 30];
+
+    function startHeartbeats() {
+      stopHeartbeats();
+      heartbeatIntervals.forEach(function (secs) {
+        heartbeatTimers.push(setTimeout(function () {
+          if (document.visibilityState !== "hidden") {
+            sendDuration(currentUrl);
+          }
+        }, secs * 1000));
+      });
+    }
+
+    function stopHeartbeats() {
+      heartbeatTimers.forEach(function (t) { clearTimeout(t); });
+      heartbeatTimers = [];
+    }
+
+    // Start heartbeats on initial load
+    startHeartbeats();
+
+    // Restart heartbeats on SPA navigation
+    var origTrackPv = trackPageview;
+    trackPageview = function () {
+      origTrackPv();
+      startHeartbeats();
+    };
+
     // Create public API
     window.wa = window.wa || {};
     window.wa.track = function (name, props) {
@@ -238,14 +279,17 @@
           } catch(e) {}
           
           try {
-            var inpVal = 0;
+            var interactions = [];
             var inpPo = new PerformanceObserver(function(list) {
-              list.getEntries().forEach(function(e) { if (e.duration > inpVal) inpVal = e.duration; });
+              list.getEntries().forEach(function(e) { if (e.interactionId) interactions.push(e.duration); });
             });
-            inpPo.observe({ type: "event", buffered: true });
+            inpPo.observe({ type: "event", buffered: true, durationThreshold: 40 });
             document.addEventListener("visibilitychange", function() {
-              if (document.visibilityState === "hidden" && inpVal > 0) {
-                sendEvent("web_vital", { metric: "INP", value: Math.round(inpVal) });
+              if (document.visibilityState === "hidden" && interactions.length > 0) {
+                interactions.sort(function(a,b) { return a - b; });
+                var p98Index = Math.min(Math.ceil(interactions.length * 0.98) - 1, interactions.length - 1);
+                var inp = interactions[p98Index];
+                sendEvent("web_vital", { metric: "INP", value: Math.round(inp) });
                 inpPo.disconnect();
               }
             });
@@ -399,7 +443,12 @@
           
           try {
             var html = document.documentElement.outerHTML;
-            replayEvents.push({ type: 'snapshot', html: html, width: window.innerWidth, height: window.innerHeight, time: Date.now() });
+            var sanitized = html.replace(
+              /(<input[^>]*type=["'](password|email|tel|number|credit)[^>]*value=["'])[^"']*(["'])/gi,
+              '$1[REDACTED]$3'
+            );
+            sanitized = sanitized.replace(/<[^>]*data-xine-redact[^>]*>[\s\S]*?<\/[^>]*>/gi, '[REDACTED]');
+            replayEvents.push({ type: 'snapshot', html: sanitized, width: window.innerWidth, height: window.innerHeight, time: Date.now() });
           } catch(e) {}
 
           var recordReplayEvent = function(eType, data) {

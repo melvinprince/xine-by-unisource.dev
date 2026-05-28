@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { alerts, sites } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { validateOrThrow, createAlertSchema, uuidSchema, siteIdSchema, ValidationError } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const siteId = searchParams.get("siteId");
-    if (!siteId) return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
+    const rawSiteId = searchParams.get("siteId");
+    if (!rawSiteId) return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
+
+    const siteId = validateOrThrow(siteIdSchema, rawSiteId);
 
     if (siteId !== "all") {
       const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
@@ -22,6 +25,9 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({ alerts: siteAlerts });
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("[alerts] GET Error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -30,28 +36,24 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { siteId, type, threshold, channel, channelTarget } = body;
+    const validated = validateOrThrow(createAlertSchema, body);
 
-    if (!siteId || !type || !threshold || !channel || !channelTarget) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-    }
-
-    const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
+    const site = await db.query.sites.findFirst({ where: eq(sites.id, validated.siteId) });
     if (!site) return NextResponse.json({ error: "Site not found" }, { status: 404 });
 
-    // threshold should be a JSON object like { value: 1000, timeframe: '1h' }
-    const thresholdObj = typeof threshold === 'object' ? threshold : { value: Number(threshold), timeframe: '1h' };
-
     const newAlert = await db.insert(alerts).values({
-      site_id: siteId,
-      type,
-      threshold: thresholdObj,
-      channel,
-      channel_target: channelTarget,
+      site_id: validated.siteId,
+      type: validated.type,
+      threshold: validated.threshold,
+      channel: validated.channel,
+      channel_target: validated.channelTarget,
     }).returning();
 
     return NextResponse.json(newAlert[0], { status: 201 });
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error("[alerts] POST Error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

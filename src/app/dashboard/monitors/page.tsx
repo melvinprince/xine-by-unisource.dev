@@ -1,54 +1,99 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useDashboardContext } from "@/components/DashboardContext";
 import SiteSelector from "@/components/SiteSelector";
 import HelpTooltip from "@/components/HelpTooltip";
 import FeatureGuide from "@/components/FeatureGuide";
 import { Bell, Activity, Send } from "lucide-react";
+import { LoadingState, ErrorState } from "@/components/DataStates";
+
+interface UptimeCheck {
+  id: string;
+  status: string;
+  checked_at: string;
+  response_time: number;
+}
+
+interface AlertRule {
+  id: string;
+  type: string;
+  channel: string;
+  channel_target: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  threshold: any;
+}
+
+interface EmailReport {
+  id: string;
+  schedule: string;
+  recipients: string[];
+}
 
 export default function MonitorsPage() {
   const { selectedSite: currentSite, sites, setSelectedSite } = useDashboardContext();
-  const [uptime, setUptime] = useState<any[]>([]);
-  const [alerts, setAlerts] = useState<any[]>([]);
-  const [reports, setReports] = useState<any[]>([]);
+  const [uptime, setUptime] = useState<UptimeCheck[]>([]);
+  const [alerts, setAlerts] = useState<AlertRule[]>([]);
+  const [reports, setReports] = useState<EmailReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchData = useCallback(async () => {
     if (!currentSite) return;
     setLoading(true);
-    Promise.all([
-      fetch(`/api/dashboard/uptime?siteId=${currentSite}`).then(r => r.json()),
-      fetch(`/api/dashboard/alerts?siteId=${currentSite}`).then(r => r.json()),
-      fetch(`/api/dashboard/reports?siteId=${currentSite}`).then(r => r.json())
-    ]).then(([u, a, r]) => {
+    setError(null);
+    try {
+      const [u, a, r] = await Promise.all([
+        fetch(`/api/dashboard/uptime?siteId=${currentSite}`).then(res => {
+          if (!res.ok) throw new Error("Failed to load uptime");
+          return res.json();
+        }),
+        fetch(`/api/dashboard/alerts?siteId=${currentSite}`).then(res => {
+          if (!res.ok) throw new Error("Failed to load alerts");
+          return res.json();
+        }),
+        fetch(`/api/dashboard/reports?siteId=${currentSite}`).then(res => {
+          if (!res.ok) throw new Error("Failed to load reports");
+          return res.json();
+        })
+      ]);
       if (u.checks) setUptime(u.checks);
       if (a.alerts) setAlerts(a.alerts);
       if (r.reports) setReports(r.reports);
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : "Failed to load monitors data");
+    } finally {
       setLoading(false);
-    });
+    }
   }, [currentSite]);
 
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-100">Monitors & Alerts <HelpTooltip title="Monitors & Alerts" content="Monitor your site's uptime, set up traffic alerts, and configure automated email reports." /></h1>
-          <p className="text-slate-400 mt-2">Manage uptime checks, triggered alerts, and email reports.</p>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0 }}>
+            Monitors & Alerts <HelpTooltip title="Monitors & Alerts" content="Monitor your site's uptime, set up traffic alerts, and configure automated email reports." />
+          </h2>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0.25rem 0 0' }}>Manage uptime checks, triggered alerts, and email reports.</p>
         </div>
         <SiteSelector sites={sites} selected={currentSite} onChange={setSelectedSite} />
       </div>
 
       {loading ? (
-        <div className="flex justify-center p-12">
-           <div className="w-8 h-8 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin"/>
-        </div>
+        <LoadingState message="Loading monitors & alerts..." />
+      ) : error ? (
+        <ErrorState message={error} onRetry={fetchData} />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="glass-card p-6 border-slate-700/50">
-            <h3 className="text-lg font-semibold flex items-center gap-2 mb-4 text-emerald-400"><Activity className="w-5 h-5"/> Uptime Checks <HelpTooltip title="Uptime Checks" content="Monitors your site by pinging it at regular intervals. Records response time and status (up/down). Requires the uptime cron job to be running on your server." /></h3>
+          <div className="glass-card" style={{ padding: '1.5rem' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--color-accent)' }}><Activity className="w-5 h-5"/> Uptime Checks <HelpTooltip title="Uptime Checks" content="Monitors your site by pinging it at regular intervals. Records response time and status (up/down). Requires the uptime cron job to be running on your server." /></h3>
             {uptime.length === 0 ? (
               <div>
-                <p className="text-slate-500 text-sm mb-3">No checks recorded yet.</p>
+                <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem', marginBottom: '0.75rem' }}>No checks recorded yet.</p>
                 <FeatureGuide
                   title="How Uptime Checks Work"
                   steps={[
@@ -69,25 +114,25 @@ export default function MonitorsPage() {
                 />
               </div>
             ) : (
-              <div className="space-y-3">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {uptime.slice(0, 5).map((u, i) => (
-                  <div key={i} className="flex justify-between items-center bg-slate-800/50 p-3 rounded-lg text-sm">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${u.status === 'up' ? 'bg-emerald-500' : 'bg-red-500'}`}/>
-                      <span className="text-slate-300">{new Date(u.checked_at).toLocaleTimeString()}</span>
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-bg-overlay)', padding: '0.75rem', borderRadius: 'var(--radius-md)', fontSize: '0.875rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: u.status === 'up' ? 'var(--color-accent)' : 'var(--color-error, #ef4444)' }}/>
+                      <span style={{ color: 'var(--color-text-primary)' }}>{new Date(u.checked_at).toLocaleTimeString()}</span>
                     </div>
-                    <span className="text-slate-400 font-mono">{u.response_time}ms</span>
+                    <span style={{ color: 'var(--color-text-secondary)', fontFamily: 'monospace' }}>{u.response_time}ms</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          <div className="glass-card p-6 border-slate-700/50">
-            <h3 className="text-lg font-semibold flex items-center gap-2 mb-4 text-rose-400"><Bell className="w-5 h-5"/> Triggers & Alerts <HelpTooltip title="Triggers & Alerts" content="Set threshold-based alerts that notify you when metrics exceed or drop below configured values." /></h3>
+          <div className="glass-card" style={{ padding: '1.5rem' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--color-error, #ef4444)' }}><Bell className="w-5 h-5"/> Triggers & Alerts <HelpTooltip title="Triggers & Alerts" content="Set threshold-based alerts that notify you when metrics exceed or drop below configured values." /></h3>
             {alerts.length === 0 ? (
               <div>
-                <p className="text-slate-500 text-sm mb-3">No alerts configured yet.</p>
+                <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem', marginBottom: '0.75rem' }}>No alerts configured yet.</p>
                 <FeatureGuide
                   title="How to Set Up Alerts"
                   steps={[
@@ -108,25 +153,25 @@ export default function MonitorsPage() {
                 />
               </div>
             ) : (
-              <div className="space-y-3">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {alerts.map((a, i) => (
-                  <div key={i} className="bg-slate-800/50 p-3 rounded-lg text-sm flex justify-between items-center">
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-bg-overlay)', padding: '0.75rem', borderRadius: 'var(--radius-md)', fontSize: '0.875rem' }}>
                     <div>
-                      <div className="text-slate-200 capitalize">{a.type.replace('_', ' ')}</div>
-                      <div className="text-xs text-slate-500">{a.channel} &rarr; {a.channel_target}</div>
+                      <div style={{ color: 'var(--color-text-primary)', textTransform: 'capitalize' }}>{a.type.replace('_', ' ')}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>{a.channel} &rarr; {a.channel_target}</div>
                     </div>
-                    <span className="text-slate-400 font-mono">{a.threshold}</span>
+                    <span style={{ color: 'var(--color-text-secondary)', fontFamily: 'monospace' }}>{typeof a.threshold === 'object' ? a.threshold.value : a.threshold}</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          <div className="glass-card p-6 border-slate-700/50">
-            <h3 className="text-lg font-semibold flex items-center gap-2 mb-4 text-blue-400"><Send className="w-5 h-5"/> Email Reports <HelpTooltip title="Email Reports" content="Automated periodic emails summarizing your site's key metrics. Configure weekly or monthly delivery to any email address." /></h3>
+          <div className="glass-card" style={{ padding: '1.5rem' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--color-chart-1)' }}><Send className="w-5 h-5"/> Email Reports <HelpTooltip title="Email Reports" content="Automated periodic emails summarizing your site's key metrics. Configure weekly or monthly delivery to any email address." /></h3>
             {reports.length === 0 ? (
               <div>
-                <p className="text-slate-500 text-sm mb-3">No reports configured yet.</p>
+                <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem', marginBottom: '0.75rem' }}>No reports configured yet.</p>
                 <FeatureGuide
                   title="How Email Reports Work"
                   steps={[
@@ -147,12 +192,12 @@ export default function MonitorsPage() {
                 />
               </div>
             ) : (
-              <div className="space-y-3">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {reports.map((r, i) => (
-                  <div key={i} className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50 text-sm flex justify-between items-center">
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-bg-overlay)', padding: '0.75rem', borderRadius: 'var(--radius-md)', fontSize: '0.875rem', border: '1px solid var(--color-border-subtle)' }}>
                     <div>
-                      <div className="text-slate-200 capitalize">{r.schedule} Report</div>
-                      <div className="text-xs text-slate-500">{r.recipients.length} recipients</div>
+                      <div style={{ color: 'var(--color-text-primary)', textTransform: 'capitalize' }}>{r.schedule} Report</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>{r.recipients.length} recipients</div>
                     </div>
                   </div>
                 ))}

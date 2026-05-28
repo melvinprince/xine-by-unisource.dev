@@ -23,16 +23,6 @@ export default function SiteSelector({
   const selectedSite = sites.find((s) => s.id === selected);
   const label = selected === 'all' ? 'All Sites' : selectedSite?.name ?? 'Select Site';
 
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        closeMenu();
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
   const openMenu = () => {
     setIsOpen(true);
     requestAnimationFrame(() => {
@@ -66,6 +56,16 @@ export default function SiteSelector({
       setIsOpen(false);
     }
   };
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        closeMenu();
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
 
   const handleSelect = (id: string) => {
     onChange(id);

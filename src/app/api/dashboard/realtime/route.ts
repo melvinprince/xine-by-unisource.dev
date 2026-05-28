@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRealtimeStats } from "@/lib/queries-advanced";
+import { verifySiteExists, siteNotFoundResponse } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const siteId = searchParams.get("siteId") || "all";
+
+    // Verify Site UUID exists in database (or is "all")
+    const exists = await verifySiteExists(siteId);
+    if (!exists) return siteNotFoundResponse();
 
     const stats = await getRealtimeStats(siteId);
 

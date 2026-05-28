@@ -10,37 +10,21 @@ import {
   getTopEvents,
   getSiteById,
 } from "@/lib/queries";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse } from "@/lib/api-helpers";
 
-/**
- * GET /api/dashboard/site-detail
- *
- * Returns full site detail data: overview + custom events + site info.
- * Query params: ?siteId=xxx&from=2026-01-01&to=2026-03-09
- */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const siteId = searchParams.get("siteId");
-
-  if (!siteId) {
-    return NextResponse.json(
-      { error: "siteId is required" },
-      { status: 400 }
-    );
-  }
-
+  const siteId = searchParams.get("siteId") || "all";
   const fromStr = searchParams.get("from");
   const toStr = searchParams.get("to");
 
-  const to = toStr ? new Date(toStr) : new Date();
-  const from = fromStr
-    ? new Date(fromStr)
-    : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  // 1. Verify Site UUID exists in database (or is "all")
+  const exists = await verifySiteExists(siteId);
+  if (!exists) return siteNotFoundResponse();
 
-  if (toStr && !toStr.includes('T')) {
-    to.setHours(23, 59, 59, 999);
-  }
-
-  const dateRange = { from, to };
+  // 2. Safely parse and validate date range
+  const dateRange = parseDateRange(fromStr, toStr);
+  if (!dateRange) return invalidDateResponse();
 
   try {
     const [
@@ -54,7 +38,7 @@ export async function GET(request: NextRequest) {
       countryStats,
       customEvents,
     ] = await Promise.all([
-      getSiteById(siteId),
+      siteId === "all" ? Promise.resolve({ id: "all", name: "All Sites", domain: "*" }) : getSiteById(siteId),
       getOverviewStats(siteId, dateRange),
       getVisitorTimeseries(siteId, dateRange),
       getTopPages(siteId, dateRange),
@@ -66,10 +50,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     if (!site) {
-      return NextResponse.json(
-        { error: "Site not found" },
-        { status: 404 }
-      );
+      return siteNotFoundResponse();
     }
 
     return NextResponse.json({

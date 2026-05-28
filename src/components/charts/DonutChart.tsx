@@ -8,6 +8,7 @@ import { Monitor, Smartphone, Tablet } from 'lucide-react';
 
 interface DonutChartProps {
   data: DeviceBreakdown;
+  title?: string;
 }
 
 const COLORS = [
@@ -41,7 +42,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   );
 }
 
-export default function DonutChart({ data }: DonutChartProps) {
+export default function DonutChart({ data, title = "Devices" }: DonutChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const chartData = [
@@ -50,7 +51,7 @@ export default function DonutChart({ data }: DonutChartProps) {
     { name: 'Tablet', value: data.tablet },
   ];
 
-  const total = data.desktop + data.mobile + data.tablet;
+  const total = data.desktop + data.mobile + data.tablet || 1; // avoid division by 0
 
   useEffect(() => {
     if (containerRef.current) {
@@ -76,7 +77,7 @@ export default function DonutChart({ data }: DonutChartProps) {
           marginBottom: '1rem',
         }}
       >
-        Devices
+        {title}
       </h3>
 
       <div style={{ width: '100%', height: 200 }}>

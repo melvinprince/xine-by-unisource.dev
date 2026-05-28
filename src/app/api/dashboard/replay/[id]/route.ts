@@ -5,13 +5,12 @@ import { eq, and, asc } from "drizzle-orm";
 
 export async function GET(
   request: NextRequest,
-  { params }: any
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-
+    const { id: sessionId } = await params;
     const { searchParams } = new URL(request.url);
     const siteId = searchParams.get("siteId");
-    const sessionId = params.id;
 
     if (!siteId || !sessionId) {
       return NextResponse.json({ error: "Missing siteId or sessionId" }, { status: 400 });

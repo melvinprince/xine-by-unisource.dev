@@ -7,6 +7,7 @@ import {
   getHourlyHeatmap,
   getPeakHours,
 } from "@/lib/queries-advanced";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,14 +16,13 @@ export async function GET(request: NextRequest) {
     const from = searchParams.get("from");
     const to = searchParams.get("to");
 
-    if (!from || !to) {
-      return NextResponse.json(
-        { error: "Missing date range" },
-        { status: 400 }
-      );
-    }
+    // 1. Verify Site UUID exists in database (or is "all")
+    const exists = await verifySiteExists(siteId);
+    if (!exists) return siteNotFoundResponse();
 
-    const dateRange = { from: new Date(from), to: new Date(to) };
+    // 2. Safely parse and validate date range
+    const dateRange = parseDateRange(from, to);
+    if (!dateRange) return invalidDateResponse();
 
     const [sessionStats, newVsReturning, sessionTimeseries, engagement, heatmap, peakHours] =
       await Promise.all([

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Users, Eye, Clock, ArrowDownUp, BarChart3 } from 'lucide-react';
 import StatCard from '@/components/StatCard';
 import VisitorChart from '@/components/charts/VisitorChart';
@@ -79,7 +80,7 @@ export default function SiteDetailPage() {
           opacity: 0,
         }}
       >
-        <a
+        <Link
           href="/dashboard"
           style={{
             color: 'var(--color-text-muted)',
@@ -94,7 +95,7 @@ export default function SiteDetailPage() {
           }
         >
           Overview
-        </a>
+        </Link>
         <span>→</span>
         <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
           {site.name}

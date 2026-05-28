@@ -22,7 +22,21 @@ interface VisitorChartProps {
   primaryLabel?: string;
 }
 
-function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number; dataKey: string; name?: string }>; label?: string }) {
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{ value: number; dataKey: string; name?: string }>;
+  label?: string;
+  primaryLabel?: string;
+  primaryDataKey?: string;
+}
+
+function CustomTooltip({ 
+  active, 
+  payload, 
+  label, 
+  primaryLabel = "Visitors", 
+  primaryDataKey = "visitors" 
+}: CustomTooltipProps) {
   if (!active || !payload) return null;
   return (
     <div
@@ -50,13 +64,13 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
             fontSize: '0.8125rem',
             fontWeight: 600,
             color:
-              entry.dataKey === 'visitors'
+              entry.dataKey === 'visitors' || entry.dataKey === primaryDataKey
                 ? 'hsl(217 91% 60%)'
                 : 'hsl(271 81% 65%)',
             margin: '0.125rem 0',
           }}
         >
-          {entry.dataKey === 'visitors' || entry.dataKey === 'count' ? (entry.name || 'Count') : 'Pageviews'}:{' '}
+          {entry.dataKey === 'visitors' || entry.dataKey === primaryDataKey ? primaryLabel : 'Pageviews'}:{' '}
           {entry.value.toLocaleString()}
         </p>
       ))}
@@ -159,7 +173,7 @@ export default function VisitorChart({
                 v >= 1000 ? `${(v / 1000).toFixed(0)}K` : String(v)
               }
             />
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip content={<CustomTooltip primaryLabel={primaryLabel} primaryDataKey={primaryDataKey} />} />
             <Area
               type="monotone"
               dataKey={primaryDataKey}

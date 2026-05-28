@@ -59,6 +59,9 @@ export function addToBanCache(ip: string) {
  * VULN-005 FIX: Prefer separate secret from the password.
  */
 function getSessionSecret(): string | undefined {
+  if (!process.env.SESSION_SECRET) {
+    console.warn("[security] SESSION_SECRET is not defined. Falling back to DASHBOARD_PASSWORD. This is insecure for production!");
+  }
   return process.env.SESSION_SECRET || process.env.DASHBOARD_PASSWORD;
 }
 
@@ -192,6 +195,33 @@ export async function proxy(request: NextRequest) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("redirect", pathname);
       return NextResponse.redirect(loginUrl);
+    }
+
+    // CSRF Protection for state-changing protected API routes
+    if (isProtectedApi && ["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
+      const origin = request.headers.get("origin");
+      const referer = request.headers.get("referer");
+      const host = request.headers.get("host") || request.nextUrl.host;
+
+      let isValidOrigin = false;
+      if (origin) {
+        try {
+          const originUrl = new URL(origin);
+          isValidOrigin = originUrl.host === host;
+        } catch {}
+      } else if (referer) {
+        try {
+          const refererUrl = new URL(referer);
+          isValidOrigin = refererUrl.host === host;
+        } catch {}
+      }
+
+      if (!isValidOrigin) {
+        return NextResponse.json(
+          { error: "CSRF verification failed. Request blocked." },
+          { status: 403 }
+        );
+      }
     }
 
     // VULN-018 FIX: Rate limit authenticated dashboard API requests

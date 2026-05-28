@@ -90,7 +90,7 @@ export default function HeatmapChart({
 
           {/* Grid rows */}
           {DAYS.map((day, dayIdx) => (
-            <>
+            <div key={`row-container-${dayIdx}`} style={{ display: 'contents' }}>
               <div
                 key={`label-${day}`}
                 style={{
@@ -132,7 +132,7 @@ export default function HeatmapChart({
                   />
                 );
               })}
-            </>
+            </div>
           ))}
         </div>
       </div>

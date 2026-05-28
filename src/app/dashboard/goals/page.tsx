@@ -29,11 +29,16 @@ interface Goal {
   rate: string;
 }
 
+import { useDashboardFetch } from '@/hooks/use-dashboard-data';
+
 export default function GoalsPage() {
   const { selectedSite, dateRange } = useDashboardContext();
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, refetch } = useDashboardFetch<Goal[]>(
+    '/api/dashboard/goals',
+    selectedSite,
+    dateRange
+  );
+  const goals = data || [];
 
   // Modal State
   const [showAdd, setShowAdd] = useState(false);
@@ -58,28 +63,6 @@ export default function GoalsPage() {
       });
     }
   }, [loading, error, goals.length]);
-
-  const fetchGoals = async () => {
-    if (selectedSite === 'all') return;
-    setLoading(true);
-    try {
-      const res = await fetch(
-        `/api/dashboard/goals?siteId=${selectedSite}&from=${dateRange.from}&to=${dateRange.to}`
-      );
-      if (!res.ok) throw new Error('Failed to load goals');
-      const data = await res.json();
-      setGoals(data);
-      setError(null);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchGoals();
-  }, [selectedSite, dateRange]);
 
   const openModal = () => {
     setShowAdd(true);
@@ -126,7 +109,7 @@ export default function GoalsPage() {
         }),
       });
       if (!res.ok) throw new Error('Failed to save goal');
-      await fetchGoals();
+      refetch();
       closeModal();
     } catch (err) {
       console.error(err);
@@ -141,7 +124,7 @@ export default function GoalsPage() {
       gsap.to(el, {
         scale: 0.9, opacity: 0, height: 0, marginTop: 0, duration: 0.3, onComplete: () => {
           fetch(`/api/sites/${selectedSite}/goals/${goalId}`, { method: 'DELETE' })
-            .then(() => fetchGoals());
+            .then(() => refetch());
         }
       });
     }
@@ -179,7 +162,7 @@ export default function GoalsPage() {
       {loading ? (
         <LoadingState message="Loading Goals..." />
       ) : error ? (
-        <ErrorState message={error} onRetry={fetchGoals} />
+        <ErrorState message={error} onRetry={refetch} />
       ) : goals.length === 0 ? (
         <div className="glass-card" style={{ padding: '4rem 2rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--color-bg-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.5rem', border: '1px solid var(--color-border-subtle)' }}>

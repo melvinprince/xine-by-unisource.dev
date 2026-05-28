@@ -7,8 +7,8 @@
 
 import { db } from "./db";
 import { pageviews, events, sessions } from "./db/schema";
-import { eq, gte, lte, ne, and, sql, desc, count } from "drizzle-orm";
-import { format, subDays, subMinutes, differenceInDays } from "date-fns";
+import { eq, gte, lte, ne, and, sql, desc } from "drizzle-orm";
+import { subDays, subMinutes, differenceInDays } from "date-fns";
 import type {
   DateRange,
   SessionAnalytics,
@@ -72,6 +72,7 @@ function buildEventFilters(siteId: string | "all", dateRange: DateRange) {
   const conditions = [
     gte(events.created_at, dateRange.from),
     lte(events.created_at, dateRange.to),
+    eq(events.is_bot, false),
   ];
   if (siteId !== "all") {
     conditions.push(eq(events.site_id, siteId));
@@ -93,6 +94,25 @@ function buildPageviewFilters(siteId: string | "all", dateRange: DateRange) {
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+const VITAL_THRESHOLDS: Record<string, { good: number; poor: number }> = {
+  LCP: { good: 2500, poor: 4000 },
+  FCP: { good: 1800, poor: 3000 },
+  CLS: { good: 100, poor: 250 }, // CLS × 1000
+  INP: { good: 200, poor: 500 },
+  TTFB: { good: 800, poor: 1800 },
+};
+
+function rateVital(
+  metric: string,
+  value: number
+): "good" | "needs-improvement" | "poor" {
+  const t = VITAL_THRESHOLDS[metric];
+  if (!t) return "good";
+  if (value <= t.good) return "good";
+  if (value <= t.poor) return "needs-improvement";
+  return "poor";
+}
+
 // ============================================================
 // SESSION ANALYTICS
 // ============================================================
@@ -103,87 +123,68 @@ export async function getSessionAnalytics(
 ): Promise<SessionAnalytics> {
   const prevRange = getPreviousDateRange(dateRange);
 
-  const currentRows = await db
+  const statsQuery = (range: DateRange) => db
     .select({
-      page_count: sessions.page_count,
-      total_duration: sessions.total_duration,
-      visitor_id: sessions.visitor_id,
+      totalSessions: sql<number>`COUNT(*)::int`,
+      avgPages: sql<number>`COALESCE(ROUND(AVG(${sessions.page_count})::numeric, 1), 0)::float`,
+      avgDuration: sql<number>`COALESCE(ROUND(AVG(${sessions.total_duration})), 0)::int`,
     })
     .from(sessions)
-    .where(buildSessionFilters(siteId, dateRange));
+    .where(buildSessionFilters(siteId, range));
 
-  const prevRows = await db
+  const visitorsQuery = (range: DateRange) => db
     .select({
-      page_count: sessions.page_count,
-      total_duration: sessions.total_duration,
+      total: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
     })
     .from(sessions)
-    .where(buildSessionFilters(siteId, prevRange));
+    .where(buildSessionFilters(siteId, range));
 
-  const totalSessions = currentRows.length;
-  const prevTotalSessions = prevRows.length;
-
-  const avgPagesPerSession =
-    totalSessions > 0
-      ? Math.round(
-          (currentRows.reduce((sum, r) => sum + r.page_count, 0) /
-            totalSessions) *
-            10
-        ) / 10
-      : 0;
-  const prevAvgPages =
-    prevTotalSessions > 0
-      ? Math.round(
-          (prevRows.reduce((sum, r) => sum + r.page_count, 0) /
-            prevTotalSessions) *
-            10
-        ) / 10
-      : 0;
-
-  const avgSessionDuration =
-    totalSessions > 0
-      ? Math.round(
-          currentRows.reduce((sum, r) => sum + r.total_duration, 0) /
-            totalSessions
-        )
-      : 0;
-  const prevAvgDuration =
-    prevTotalSessions > 0
-      ? Math.round(
-          prevRows.reduce((sum, r) => sum + r.total_duration, 0) /
-            prevTotalSessions
-        )
-      : 0;
-
-  // New vs Returning: check if visitor_id existed before the date range
-  const visitorIds = [...new Set(currentRows.map((r) => r.visitor_id))];
-  let newVisitorCount = 0;
-  if (visitorIds.length > 0) {
-    // Check which visitors had sessions before this date range
-    const existingVisitors = await db
-      .select({ visitor_id: sessions.visitor_id })
-      .from(sessions)
-      .where(
-        and(
-          ...(siteId !== "all" ? [eq(sessions.site_id, siteId)] : []),
-          lte(sessions.started_at, dateRange.from)
-        )
+  const newVisitorsQuery = (range: DateRange) => db
+    .select({
+      newCount: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
+    })
+    .from(sessions)
+    .where(
+      and(
+        buildSessionFilters(siteId, range),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${sessions} s2 
+          WHERE s2.visitor_id = ${sessions.visitor_id} 
+            AND s2.started_at < ${range.from}
+            ${siteId !== 'all' ? sql`AND s2.site_id = ${siteId}` : sql``}
+        )`
       )
-      .groupBy(sessions.visitor_id);
+    );
 
-    const existingSet = new Set(existingVisitors.map((r) => r.visitor_id));
-    newVisitorCount = visitorIds.filter((v) => !existingSet.has(v)).length;
-  }
+  const [
+    [current],
+    [prev],
+    [currentVisitors],
+    [currentNew]
+  ] = await Promise.all([
+    statsQuery(dateRange),
+    statsQuery(prevRange),
+    visitorsQuery(dateRange),
+    newVisitorsQuery(dateRange)
+  ]);
 
-  const totalVisitors = visitorIds.length;
-  const newPct = totalVisitors > 0 ? Math.round((newVisitorCount / totalVisitors) * 100) : 0;
+  const totalSessions = current.totalSessions || 0;
+  const prevTotalSessions = prev.totalSessions || 0;
+  const avgPagesPerSession = current.avgPages || 0;
+  const prevAvgPages = prev.avgPages || 0;
+  const avgSessionDuration = current.avgDuration || 0;
+  const prevAvgDuration = prev.avgDuration || 0;
+
+  const totalVisitors = currentVisitors.total || 0;
+  const newVisitors = currentNew.newCount || 0;
+  const newPct = totalVisitors > 0 ? Math.round((newVisitors / totalVisitors) * 100) : 0;
 
   return {
     totalSessions,
     avgPagesPerSession,
     avgSessionDuration,
     newVisitorPercent: newPct,
-    returningVisitorPercent: 100 - newPct,
+    returningVisitorPercent: totalVisitors > 0 ? 100 - newPct : 0,
     sessionsChange: calcChange(totalSessions, prevTotalSessions),
     pagesPerSessionChange: calcChange(avgPagesPerSession * 10, prevAvgPages * 10),
     sessionDurationChange: calcChange(avgSessionDuration, prevAvgDuration),
@@ -194,38 +195,40 @@ export async function getNewVsReturning(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<NewVsReturning> {
-  const currentVisitors = await db
-    .select({ visitor_id: sessions.visitor_id })
+  const totalQuery = await db
+    .select({
+      total: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
+    })
     .from(sessions)
-    .where(buildSessionFilters(siteId, dateRange))
-    .groupBy(sessions.visitor_id);
+    .where(buildSessionFilters(siteId, dateRange));
 
-  const visitorIds = currentVisitors.map((r) => r.visitor_id);
-  if (visitorIds.length === 0) {
-    return { newVisitors: 0, returningVisitors: 0, newPercent: 0, returningPercent: 0 };
-  }
-
-  const existingVisitors = await db
-    .select({ visitor_id: sessions.visitor_id })
+  const newQuery = await db
+    .select({
+      newCount: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
+    })
     .from(sessions)
     .where(
       and(
-        ...(siteId !== "all" ? [eq(sessions.site_id, siteId)] : []),
-        lte(sessions.started_at, dateRange.from)
+        buildSessionFilters(siteId, dateRange),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${sessions} s2 
+          WHERE s2.visitor_id = ${sessions.visitor_id} 
+            AND s2.started_at < ${dateRange.from}
+            ${siteId !== 'all' ? sql`AND s2.site_id = ${siteId}` : sql``}
+        )`
       )
-    )
-    .groupBy(sessions.visitor_id);
+    );
 
-  const existingSet = new Set(existingVisitors.map((r) => r.visitor_id));
-  const newV = visitorIds.filter((v) => !existingSet.has(v)).length;
-  const retV = visitorIds.length - newV;
-  const total = visitorIds.length;
+  const total = totalQuery[0]?.total || 0;
+  const newV = newQuery[0]?.newCount || 0;
+  const retV = total - newV;
+  const newPercent = total > 0 ? Math.round((newV / total) * 100) : 0;
 
   return {
     newVisitors: newV,
     returningVisitors: retV,
-    newPercent: Math.round((newV / total) * 100),
-    returningPercent: Math.round((retV / total) * 100),
+    newPercent,
+    returningPercent: total > 0 ? 100 - newPercent : 0,
   };
 }
 
@@ -233,25 +236,22 @@ export async function getSessionTimeseries(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<SessionTimeseriesPoint[]> {
+  const daysDiff = differenceInDays(dateRange.to, dateRange.from);
+  const bucket = daysDiff <= 2 ? 'hour' : 'day';
+  const truncatedDate = sql`DATE_TRUNC(${bucket}, ${sessions.started_at})`;
+  const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
+
   const rows = await db
-    .select({ started_at: sessions.started_at })
+    .select({
+      date: sql<string>`to_char(${truncatedDate}, ${dateFormat})`,
+      sessions: sql<number>`COUNT(*)::int`,
+    })
     .from(sessions)
     .where(buildSessionFilters(siteId, dateRange))
-    .orderBy(sessions.started_at);
+    .groupBy(truncatedDate)
+    .orderBy(truncatedDate);
 
-  const isHourly = differenceInDays(dateRange.to, dateRange.from) <= 2;
-  const dateFormatStr = isHourly ? "yyyy-MM-dd HH:00" : "yyyy-MM-dd";
-
-  const dateMap = new Map<string, number>();
-  rows.forEach((row) => {
-    const date = format(new Date(row.started_at), dateFormatStr);
-    dateMap.set(date, (dateMap.get(date) || 0) + 1);
-  });
-
-  return Array.from(dateMap.entries()).map(([date, sessions]) => ({
-    date,
-    sessions,
-  }));
+  return rows;
 }
 
 // ============================================================
@@ -262,77 +262,73 @@ export async function getEngagementMetrics(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<EngagementMetrics> {
-  // Get sessions with engagement data
-  const sessionRows = await db
-    .select({
-      total_duration: sessions.total_duration,
-      page_count: sessions.page_count,
-      session_id: sessions.id,
-    })
-    .from(sessions)
-    .where(buildSessionFilters(siteId, dateRange));
-
-  // Get scroll depth events for the period
-  const scrollEvents = await db
+  const scrollSub = db
     .select({
       session_id: events.session_id,
-      properties: events.properties,
+      max_depth: sql<number>`MAX((properties->>'depth')::int)::int`.as('max_depth'),
     })
     .from(events)
-    .where(
-      and(
-        buildEventFilters(siteId, dateRange),
-        eq(events.name, "scroll_depth")
-      )
-    );
+    .where(and(buildEventFilters(siteId, dateRange), eq(events.name, 'scroll_depth')))
+    .groupBy(events.session_id)
+    .as('scroll_sub');
 
-  // Max scroll depth per session
-  const sessionScrollMap = new Map<string, number>();
-  scrollEvents.forEach((e) => {
-    const props = e.properties as Record<string, unknown>;
-    const depth = (props.depth as number) || 0;
-    const current = sessionScrollMap.get(e.session_id) || 0;
-    if (depth > current) sessionScrollMap.set(e.session_id, depth);
-  });
+  const rows = await db
+    .select({
+      score: sql<number>`ROUND(
+        LEAST(${sessions.total_duration}::float / 300, 1) * 40 +
+        LEAST(${sessions.page_count}::float / 5, 1) * 30 +
+        COALESCE(${scrollSub.max_depth}::float / 100, 0) * 30
+      )::int`,
+      scrollDepth: sql<number>`COALESCE(${scrollSub.max_depth}, 0)::int`,
+      total_duration: sessions.total_duration,
+      page_count: sessions.page_count,
+    })
+    .from(sessions)
+    .leftJoin(scrollSub, eq(sessions.id, scrollSub.session_id))
+    .where(buildSessionFilters(siteId, dateRange));
 
-  // Compute engagement scores
+  if (rows.length === 0) {
+    return {
+      avgEngagementScore: 0,
+      highlyEngaged: 0,
+      moderatelyEngaged: 0,
+      lowEngagement: 0,
+      avgScrollDepth: 0,
+      avgTimeOnPage: 0,
+    };
+  }
+
   let totalScore = 0;
   let highCount = 0;
   let midCount = 0;
   let lowCount = 0;
   let totalScrollDepth = 0;
   let scrollCount = 0;
+  let totalDuration = 0;
+  let totalPageviews = 0;
 
-  sessionRows.forEach((s) => {
-    const durationScore = Math.min(s.total_duration / 300, 1) * 40; // max 40 pts
-    const pageScore = Math.min(s.page_count / 5, 1) * 30; // max 30 pts
-    const scrollDepth = sessionScrollMap.get(s.session_id) || 0;
-    const scrollScore = (scrollDepth / 100) * 30; // max 30 pts
-    const score = Math.round(durationScore + pageScore + scrollScore);
-
+  rows.forEach((r) => {
+    const score = r.score || 0;
     totalScore += score;
     if (score >= 70) highCount++;
     else if (score >= 40) midCount++;
     else lowCount++;
 
-    if (scrollDepth > 0) {
-      totalScrollDepth += scrollDepth;
+    if (r.scrollDepth > 0) {
+      totalScrollDepth += r.scrollDepth;
       scrollCount++;
     }
+    totalDuration += r.total_duration;
+    totalPageviews += r.page_count;
   });
 
-  const totalDuration = sessionRows.reduce((sum, r) => sum + r.total_duration, 0);
-  const totalPageviews = sessionRows.reduce((sum, r) => sum + r.page_count, 0);
-
   return {
-    avgEngagementScore:
-      sessionRows.length > 0 ? Math.round(totalScore / sessionRows.length) : 0,
+    avgEngagementScore: Math.round(totalScore / rows.length),
     highlyEngaged: highCount,
     moderatelyEngaged: midCount,
     lowEngagement: lowCount,
     avgScrollDepth: scrollCount > 0 ? Math.round(totalScrollDepth / scrollCount) : 0,
-    avgTimeOnPage:
-      totalPageviews > 0 ? Math.round(totalDuration / totalPageviews) : 0,
+    avgTimeOnPage: totalPageviews > 0 ? Math.round(totalDuration / totalPageviews) : 0,
   };
 }
 
@@ -340,30 +336,25 @@ export async function getScrollDepthAnalysis(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<ScrollDepthEntry[]> {
-  const scrollEvents = await db
+  const rows = await db
     .select({
-      properties: events.properties,
+      depth: sql<number>`(properties->>'depth')::int`,
+      count: sql<number>`COUNT(*)::int`,
     })
     .from(events)
-    .where(
-      and(
-        buildEventFilters(siteId, dateRange),
-        eq(events.name, "scroll_depth")
-      )
-    );
+    .where(and(buildEventFilters(siteId, dateRange), eq(events.name, 'scroll_depth')))
+    .groupBy(sql`(properties->>'depth')::int`);
 
-  const depthCounts = new Map<number, number>();
-  scrollEvents.forEach((e) => {
-    const props = e.properties as Record<string, unknown>;
-    const depth = (props.depth as number) || 0;
-    depthCounts.set(depth, (depthCounts.get(depth) || 0) + 1);
+  const counts = new Map<number, number>();
+  rows.forEach((r) => {
+    if (r.depth != null) counts.set(r.depth, r.count);
   });
 
-  const total = scrollEvents.length || 1;
+  const total = rows.reduce((sum, r) => sum + r.count, 0) || 1;
   return [25, 50, 75, 100].map((depth) => ({
     depth,
-    count: depthCounts.get(depth) || 0,
-    percentage: Math.round(((depthCounts.get(depth) || 0) / total) * 100),
+    count: counts.get(depth) || 0,
+    percentage: Math.round(((counts.get(depth) || 0) / total) * 100),
   }));
 }
 
@@ -376,24 +367,21 @@ export async function getHourlyHeatmap(
   dateRange: DateRange
 ): Promise<HeatmapCell[]> {
   const rows = await db
-    .select({ started_at: sessions.started_at })
+    .select({
+      day: sql<number>`EXTRACT(DOW FROM ${sessions.started_at})::int`,
+      hour: sql<number>`EXTRACT(HOUR FROM ${sessions.started_at})::int`,
+      value: sql<number>`COUNT(*)::int`,
+    })
     .from(sessions)
-    .where(buildSessionFilters(siteId, dateRange));
+    .where(buildSessionFilters(siteId, dateRange))
+    .groupBy(
+      sql`EXTRACT(DOW FROM ${sessions.started_at})`,
+      sql`EXTRACT(HOUR FROM ${sessions.started_at})`
+    );
 
-  // Initialize 7×24 grid
   const grid = new Map<string, number>();
-  for (let d = 0; d < 7; d++) {
-    for (let h = 0; h < 24; h++) {
-      grid.set(`${d}-${h}`, 0);
-    }
-  }
-
-  rows.forEach((row) => {
-    const date = new Date(row.started_at);
-    const day = date.getDay(); // 0=Sun
-    const hour = date.getHours();
-    const key = `${day}-${hour}`;
-    grid.set(key, (grid.get(key) || 0) + 1);
+  rows.forEach((r) => {
+    grid.set(`${r.day}-${r.hour}`, r.value);
   });
 
   const result: HeatmapCell[] = [];
@@ -415,24 +403,21 @@ export async function getPeakHours(
   dateRange: DateRange
 ): Promise<PeakHour[]> {
   const rows = await db
-    .select({ started_at: sessions.started_at })
+    .select({
+      hour: sql<number>`EXTRACT(HOUR FROM ${sessions.started_at})::int`,
+      visitors: sql<number>`COUNT(*)::int`,
+    })
     .from(sessions)
-    .where(buildSessionFilters(siteId, dateRange));
+    .where(buildSessionFilters(siteId, dateRange))
+    .groupBy(sql`EXTRACT(HOUR FROM ${sessions.started_at})`)
+    .orderBy(sql`COUNT(*) DESC`)
+    .limit(5);
 
-  const hourCounts = new Map<number, number>();
-  rows.forEach((row) => {
-    const hour = new Date(row.started_at).getHours();
-    hourCounts.set(hour, (hourCounts.get(hour) || 0) + 1);
-  });
-
-  return Array.from(hourCounts.entries())
-    .map(([hour, visitors]) => ({
-      hour,
-      visitors,
-      label: `${hour.toString().padStart(2, "0")}:00`,
-    }))
-    .sort((a, b) => b.visitors - a.visitors)
-    .slice(0, 5);
+  return rows.map((r) => ({
+    hour: r.hour,
+    visitors: r.visitors,
+    label: `${r.hour.toString().padStart(2, "0")}:00`,
+  }));
 }
 
 // ============================================================
@@ -445,26 +430,28 @@ export async function getEntryPages(
   limit = 10
 ): Promise<EntryExitPage[]> {
   const rows = await db
-    .select({ entry_page: sessions.entry_page })
+    .select({
+      url: sessions.entry_page,
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(sessions)
+    .where(buildSessionFilters(siteId, dateRange))
+    .groupBy(sessions.entry_page)
+    .orderBy(sql`COUNT(*) DESC`)
+    .limit(limit);
+
+  const totalRow = await db
+    .select({ total: sql<number>`COUNT(*)::int` })
     .from(sessions)
     .where(buildSessionFilters(siteId, dateRange));
 
-  if (rows.length === 0) return [];
+  const total = totalRow[0]?.total || 1;
 
-  const pageMap = new Map<string, number>();
-  rows.forEach((r) => {
-    pageMap.set(r.entry_page, (pageMap.get(r.entry_page) || 0) + 1);
-  });
-
-  const total = rows.length;
-  return Array.from(pageMap.entries())
-    .map(([url, count]) => ({
-      url,
-      count,
-      percentage: Math.round((count / total) * 100),
-    }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit);
+  return rows.map((r) => ({
+    url: r.url,
+    count: r.count,
+    percentage: Math.round((r.count / total) * 100),
+  }));
 }
 
 export async function getExitPages(
@@ -473,26 +460,28 @@ export async function getExitPages(
   limit = 10
 ): Promise<EntryExitPage[]> {
   const rows = await db
-    .select({ exit_page: sessions.exit_page })
+    .select({
+      url: sessions.exit_page,
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(sessions)
+    .where(buildSessionFilters(siteId, dateRange))
+    .groupBy(sessions.exit_page)
+    .orderBy(sql`COUNT(*) DESC`)
+    .limit(limit);
+
+  const totalRow = await db
+    .select({ total: sql<number>`COUNT(*)::int` })
     .from(sessions)
     .where(buildSessionFilters(siteId, dateRange));
 
-  if (rows.length === 0) return [];
+  const total = totalRow[0]?.total || 1;
 
-  const pageMap = new Map<string, number>();
-  rows.forEach((r) => {
-    pageMap.set(r.exit_page, (pageMap.get(r.exit_page) || 0) + 1);
-  });
-
-  const total = rows.length;
-  return Array.from(pageMap.entries())
-    .map(([url, count]) => ({
-      url,
-      count,
-      percentage: Math.round((count / total) * 100),
-    }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit);
+  return rows.map((r) => ({
+    url: r.url,
+    count: r.count,
+    percentage: Math.round((r.count / total) * 100),
+  }));
 }
 
 export async function getPageExitRates(
@@ -500,40 +489,35 @@ export async function getPageExitRates(
   dateRange: DateRange,
   limit = 10
 ): Promise<PageExitRate[]> {
-  // Get exit counts from sessions
-  const exitRows = await db
-    .select({ exit_page: sessions.exit_page })
+  const subExits = db
+    .select({
+      exit_page: sessions.exit_page,
+      exits: sql<number>`COUNT(*)::int`.as('exits'),
+    })
     .from(sessions)
-    .where(buildSessionFilters(siteId, dateRange));
+    .where(buildSessionFilters(siteId, dateRange))
+    .groupBy(sessions.exit_page)
+    .as('sub_exits');
 
-  // Get total view counts from pageviews
-  const viewRows = await db
-    .select({ url: pageviews.url })
+  const rows = await db
+    .select({
+      url: pageviews.url,
+      views: sql<number>`COUNT(*)::int`,
+      exits: sql<number>`COALESCE(${subExits.exits}, 0)::int`,
+    })
     .from(pageviews)
-    .where(buildPageviewFilters(siteId, dateRange));
+    .leftJoin(subExits, eq(pageviews.url, subExits.exit_page))
+    .where(buildPageviewFilters(siteId, dateRange))
+    .groupBy(pageviews.url, subExits.exits)
+    .orderBy(sql`COALESCE(${subExits.exits}, 0)::float / NULLIF(COUNT(*), 0) * 100 DESC`)
+    .limit(limit);
 
-  const exitMap = new Map<string, number>();
-  exitRows.forEach((r) => {
-    exitMap.set(r.exit_page, (exitMap.get(r.exit_page) || 0) + 1);
-  });
-
-  const viewMap = new Map<string, number>();
-  viewRows.forEach((r) => {
-    viewMap.set(r.url, (viewMap.get(r.url) || 0) + 1);
-  });
-
-  const results: PageExitRate[] = [];
-  viewMap.forEach((views, url) => {
-    const exits = exitMap.get(url) || 0;
-    results.push({
-      url,
-      views,
-      exits,
-      exitRate: views > 0 ? Math.round((exits / views) * 100) : 0,
-    });
-  });
-
-  return results.sort((a, b) => b.exitRate - a.exitRate).slice(0, limit);
+  return rows.map((r) => ({
+    url: r.url,
+    views: r.views,
+    exits: r.exits,
+    exitRate: r.views > 0 ? Math.round((r.exits / r.views) * 100) : 0,
+  }));
 }
 
 // ============================================================
@@ -545,72 +529,66 @@ export async function getUserFlows(
   dateRange: DateRange,
   limit = 15
 ): Promise<UserFlowStep[]> {
-  // Get pageviews grouped by session, ordered by time
-  const rows = await db
+  const sub = db
     .select({
       session_id: pageviews.session_id,
       url: pageviews.url,
-      created_at: pageviews.created_at,
+      prev_url: sql<string>`LAG(${pageviews.url}) OVER (PARTITION BY ${pageviews.session_id} ORDER BY ${pageviews.created_at})`.as('prev_url'),
     })
     .from(pageviews)
     .where(buildPageviewFilters(siteId, dateRange))
-    .orderBy(pageviews.session_id, pageviews.created_at);
+    .as('sub');
 
-  // Build session page sequences
-  const sessionPages = new Map<string, string[]>();
-  rows.forEach((r) => {
-    if (!sessionPages.has(r.session_id)) {
-      sessionPages.set(r.session_id, []);
-    }
-    const pages = sessionPages.get(r.session_id)!;
-    // Only add if different from the last page (avoid duplicate SPA navigations)
-    if (pages.length === 0 || pages[pages.length - 1] !== r.url) {
-      pages.push(r.url);
-    }
-  });
-
-  // Count transitions
-  const flowMap = new Map<string, number>();
-  sessionPages.forEach((pages) => {
-    for (let i = 0; i < pages.length - 1; i++) {
-      const key = `${pages[i]}→${pages[i + 1]}`;
-      flowMap.set(key, (flowMap.get(key) || 0) + 1);
-    }
-  });
-
-  return Array.from(flowMap.entries())
-    .map(([key, count]) => {
-      const [from, to] = key.split("→");
-      return { from, to, count };
+  const rows = await db
+    .select({
+      from: sub.prev_url,
+      to: sub.url,
+      count: sql<number>`COUNT(*)::int`,
     })
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit);
+    .from(sub)
+    .where(and(sql`${sub.prev_url} IS NOT NULL`, ne(sub.prev_url, sub.url)))
+    .groupBy(sub.prev_url, sub.url)
+    .orderBy(sql`COUNT(*) DESC`)
+    .limit(limit);
+
+  return rows;
 }
 
 export async function getPagesPerSessionDistribution(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<PagesPerSessionBucket[]> {
-  const rows = await db
-    .select({ page_count: sessions.page_count })
+  const bucketQuery = db
+    .select({
+      bucket: sql<string>`
+        CASE 
+          WHEN ${sessions.page_count} = 1 THEN '1'
+          WHEN ${sessions.page_count} = 2 THEN '2'
+          WHEN ${sessions.page_count} = 3 THEN '3'
+          WHEN ${sessions.page_count} <= 5 THEN '4-5'
+          WHEN ${sessions.page_count} <= 10 THEN '6-10'
+          ELSE '11+'
+        END
+      `.as('bucket'),
+    })
     .from(sessions)
-    .where(buildSessionFilters(siteId, dateRange));
+    .where(buildSessionFilters(siteId, dateRange))
+    .as('bq');
 
-  if (rows.length === 0) return [];
+  const rows = await db
+    .select({
+      pages: bucketQuery.bucket,
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(bucketQuery)
+    .groupBy(bucketQuery.bucket);
 
   const bucketMap = new Map<string, number>();
   rows.forEach((r) => {
-    let bucket: string;
-    if (r.page_count === 1) bucket = "1";
-    else if (r.page_count === 2) bucket = "2";
-    else if (r.page_count === 3) bucket = "3";
-    else if (r.page_count <= 5) bucket = "4-5";
-    else if (r.page_count <= 10) bucket = "6-10";
-    else bucket = "11+";
-    bucketMap.set(bucket, (bucketMap.get(bucket) || 0) + 1);
+    if (r.pages) bucketMap.set(r.pages, r.count);
   });
 
-  const total = rows.length;
+  const total = rows.reduce((sum, r) => sum + r.count, 0) || 1;
   const order = ["1", "2", "3", "4-5", "6-10", "11+"];
   return order
     .filter((b) => bucketMap.has(b))
@@ -625,116 +603,57 @@ export async function getPagesPerSessionDistribution(
 // WEB VITALS
 // ============================================================
 
-const VITAL_THRESHOLDS: Record<string, { good: number; poor: number }> = {
-  LCP: { good: 2500, poor: 4000 },
-  FCP: { good: 1800, poor: 3000 },
-  CLS: { good: 100, poor: 250 }, // CLS × 1000
-  INP: { good: 200, poor: 500 },
-  TTFB: { good: 800, poor: 1800 },
-};
-
-function rateVital(
-  metric: string,
-  value: number
-): "good" | "needs-improvement" | "poor" {
-  const t = VITAL_THRESHOLDS[metric];
-  if (!t) return "good";
-  if (value <= t.good) return "good";
-  if (value <= t.poor) return "needs-improvement";
-  return "poor";
-}
-
 export async function getWebVitalsTrends(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<WebVitalTrend[]> {
-  const isHourly = differenceInDays(dateRange.to, dateRange.from) <= 2;
-  const dateFormatStr = isHourly ? "yyyy-MM-dd HH:00" : "yyyy-MM-dd";
+  const daysDiff = differenceInDays(dateRange.to, dateRange.from);
+  const bucket = daysDiff <= 2 ? 'hour' : 'day';
+  const truncatedDate = sql`DATE_TRUNC(${bucket}, ${events.created_at})`;
+  const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
 
-  const vitalEvents = await db
+  const rows = await db
     .select({
-      properties: events.properties,
-      created_at: events.created_at,
+      metric: sql<string>`(properties->>'metric')`,
+      date: sql<string>`to_char(${truncatedDate}, ${dateFormat})`,
+      avgValue: sql<number>`ROUND(AVG((properties->>'value')::numeric))::int`,
     })
     .from(events)
-    .where(
-      and(
-        buildEventFilters(siteId, dateRange),
-        eq(events.name, "web_vital")
-      )
-    )
-    .orderBy(events.created_at);
+    .where(and(buildEventFilters(siteId, dateRange), eq(events.name, 'web_vital')))
+    .groupBy(sql`(properties->>'metric')`, truncatedDate);
 
-  // Group by metric then by date/hour
-  const metricData = new Map<
-    string,
-    Map<string, { total: number; count: number }>
-  >();
-
-  vitalEvents.forEach((e) => {
-    const props = e.properties as Record<string, unknown>;
-    const metric = (props.metric as string) || "";
-    const value = (props.value as number) || 0;
-    const date = format(new Date(e.created_at), dateFormatStr);
-
-    if (!metric) return;
-    if (!metricData.has(metric)) metricData.set(metric, new Map());
-    const dateMap = metricData.get(metric)!;
-    if (!dateMap.has(date)) dateMap.set(date, { total: 0, count: 0 });
-    const entry = dateMap.get(date)!;
-    entry.total += value;
-    entry.count += 1;
+  const metricData = new Map<string, { date: string; value: number }[]>();
+  rows.forEach((r) => {
+    const m = r.metric;
+    if (!m) return;
+    if (!metricData.has(m)) metricData.set(m, []);
+    metricData.get(m)!.push({ date: r.date, value: r.avgValue });
   });
 
-  // Also add TTFB from pageviews
+  const ttfbTruncatedDate = sql`DATE_TRUNC(${bucket}, ${pageviews.created_at})`;
   const ttfbRows = await db
     .select({
-      ttfb: pageviews.ttfb,
-      created_at: pageviews.created_at,
+      date: sql<string>`to_char(${ttfbTruncatedDate}, ${dateFormat})`,
+      avgValue: sql<number>`ROUND(AVG(${pageviews.ttfb}))::int`,
     })
     .from(pageviews)
-    .where(buildPageviewFilters(siteId, dateRange));
+    .where(and(buildPageviewFilters(siteId, dateRange), sql`${pageviews.ttfb} IS NOT NULL AND ${pageviews.ttfb} > 0`))
+    .groupBy(ttfbTruncatedDate);
 
-  const ttfbDateMap = new Map<string, { total: number; count: number }>();
-  ttfbRows.forEach((r) => {
-    if (r.ttfb == null || r.ttfb <= 0) return;
-    const date = format(new Date(r.created_at), dateFormatStr);
-    if (!ttfbDateMap.has(date)) ttfbDateMap.set(date, { total: 0, count: 0 });
-    const entry = ttfbDateMap.get(date)!;
-    entry.total += r.ttfb;
-    entry.count += 1;
-  });
-  if (ttfbDateMap.size > 0) {
-    metricData.set("TTFB", ttfbDateMap);
+  if (ttfbRows.length > 0) {
+    metricData.set("TTFB", ttfbRows.map((r) => ({ date: r.date, value: r.avgValue })));
   }
 
   const results: WebVitalTrend[] = [];
   const desiredMetrics = ["LCP", "FCP", "CLS", "INP", "TTFB"];
 
   desiredMetrics.forEach((metric) => {
-    const dateMap = metricData.get(metric);
-    if (!dateMap) {
-      results.push({
-        metric,
-        data: [],
-        current: 0,
-        rating: "good",
-      });
-      return;
-    }
-
-    const data = Array.from(dateMap.entries())
-      .map(([date, { total, count }]) => ({
-        date,
-        value: Math.round(total / count),
-      }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    const current = data.length > 0 ? data[data.length - 1].value : 0;
-
+    const trendData = metricData.get(metric) || [];
+    trendData.sort((a, b) => a.date.localeCompare(b.date));
+    const current = trendData.length > 0 ? trendData[trendData.length - 1].value : 0;
     results.push({
       metric,
-      data,
+      data: trendData,
       current,
       rating: rateVital(metric, current),
     });
@@ -748,83 +667,40 @@ export async function getWebVitalsByPage(
   dateRange: DateRange,
   limit = 10
 ): Promise<PageWebVital[]> {
-  // Get web vital events with their URLs
-  const vitalEvents = await db
+  const rows = await db
     .select({
       url: events.url,
-      properties: events.properties,
+      lcp: sql<number>`ROUND(AVG((properties->>'value')::numeric) FILTER (WHERE LOWER(properties->>'metric') = 'lcp'))::int`,
+      fcp: sql<number>`ROUND(AVG((properties->>'value')::numeric) FILTER (WHERE LOWER(properties->>'metric') = 'fcp'))::int`,
+      cls: sql<number>`ROUND(AVG((properties->>'value')::numeric) FILTER (WHERE LOWER(properties->>'metric') = 'cls'))::int`,
+      inp: sql<number>`ROUND(AVG((properties->>'value')::numeric) FILTER (WHERE LOWER(properties->>'metric') = 'inp'))::int`,
     })
     .from(events)
-    .where(
-      and(
-        buildEventFilters(siteId, dateRange),
-        eq(events.name, "web_vital")
-      )
-    );
+    .where(and(buildEventFilters(siteId, dateRange), eq(events.name, 'web_vital'), sql`${events.url} IS NOT NULL`))
+    .groupBy(events.url);
 
-  // Get TTFB from pageviews
   const ttfbRows = await db
     .select({
       url: pageviews.url,
-      ttfb: pageviews.ttfb,
+      ttfb: sql<number>`ROUND(AVG(${pageviews.ttfb}))::int`,
     })
     .from(pageviews)
-    .where(buildPageviewFilters(siteId, dateRange));
+    .where(and(buildPageviewFilters(siteId, dateRange), sql`${pageviews.ttfb} IS NOT NULL AND ${pageviews.ttfb} > 0`))
+    .groupBy(pageviews.url);
 
-  const pageMetrics = new Map<
-    string,
-    {
-      lcp: { total: number; count: number };
-      fcp: { total: number; count: number };
-      cls: { total: number; count: number };
-      inp: { total: number; count: number };
-      ttfb: { total: number; count: number };
-    }
-  >();
+  const ttfbMap = new Map<string, number>();
+  ttfbRows.forEach((r) => ttfbMap.set(r.url, r.ttfb));
 
-  const getOrCreate = (url: string) => {
-    if (!pageMetrics.has(url)) {
-      pageMetrics.set(url, {
-        lcp: { total: 0, count: 0 },
-        fcp: { total: 0, count: 0 },
-        cls: { total: 0, count: 0 },
-        inp: { total: 0, count: 0 },
-        ttfb: { total: 0, count: 0 },
-      });
-    }
-    return pageMetrics.get(url)!;
-  };
+  const merged = rows.map((r) => ({
+    url: r.url || "",
+    lcp: r.lcp,
+    fcp: r.fcp,
+    cls: r.cls,
+    inp: r.inp,
+    ttfb: ttfbMap.get(r.url || "") || null,
+  }));
 
-  vitalEvents.forEach((e) => {
-    const url = e.url || "";
-    if (!url) return;
-    const props = e.properties as Record<string, unknown>;
-    const metric = ((props.metric as string) || "").toLowerCase();
-    const value = (props.value as number) || 0;
-    const entry = getOrCreate(url);
-    if (metric in entry) {
-      const m = entry[metric as keyof typeof entry];
-      m.total += value;
-      m.count += 1;
-    }
-  });
-
-  ttfbRows.forEach((r) => {
-    if (r.ttfb == null || r.ttfb <= 0) return;
-    const entry = getOrCreate(r.url);
-    entry.ttfb.total += r.ttfb;
-    entry.ttfb.count += 1;
-  });
-
-  return Array.from(pageMetrics.entries())
-    .map(([url, m]) => ({
-      url,
-      lcp: m.lcp.count > 0 ? Math.round(m.lcp.total / m.lcp.count) : null,
-      fcp: m.fcp.count > 0 ? Math.round(m.fcp.total / m.fcp.count) : null,
-      cls: m.cls.count > 0 ? Math.round(m.cls.total / m.cls.count) : null,
-      inp: m.inp.count > 0 ? Math.round(m.inp.total / m.inp.count) : null,
-      ttfb: m.ttfb.count > 0 ? Math.round(m.ttfb.total / m.ttfb.count) : null,
-    }))
+  return merged
     .sort((a, b) => (b.lcp || 0) - (a.lcp || 0))
     .slice(0, limit);
 }
@@ -837,30 +713,22 @@ export async function getErrorTrend(
   siteId: string | "all",
   dateRange: DateRange
 ): Promise<ErrorTrendPoint[]> {
-  const isHourly = differenceInDays(dateRange.to, dateRange.from) <= 2;
-  const dateFormatStr = isHourly ? "yyyy-MM-dd HH:00" : "yyyy-MM-dd";
+  const daysDiff = differenceInDays(dateRange.to, dateRange.from);
+  const bucket = daysDiff <= 2 ? 'hour' : 'day';
+  const truncatedDate = sql`DATE_TRUNC(${bucket}, ${events.created_at})`;
+  const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
 
-  const errorEvents = await db
-    .select({ created_at: events.created_at })
+  const rows = await db
+    .select({
+      date: sql<string>`to_char(${truncatedDate}, ${dateFormat})`,
+      count: sql<number>`COUNT(*)::int`,
+    })
     .from(events)
-    .where(
-      and(
-        buildEventFilters(siteId, dateRange),
-        eq(events.name, "js_error")
-      )
-    )
-    .orderBy(events.created_at);
+    .where(and(buildEventFilters(siteId, dateRange), eq(events.name, 'js_error')))
+    .groupBy(truncatedDate)
+    .orderBy(truncatedDate);
 
-  const dateMap = new Map<string, number>();
-  errorEvents.forEach((e) => {
-    const date = format(new Date(e.created_at), dateFormatStr);
-    dateMap.set(date, (dateMap.get(date) || 0) + 1);
-  });
-
-  return Array.from(dateMap.entries()).map(([date, count]) => ({
-    date,
-    count,
-  }));
+  return rows;
 }
 
 export async function getTopErrors(
@@ -868,44 +736,27 @@ export async function getTopErrors(
   dateRange: DateRange,
   limit = 10
 ): Promise<ErrorEntry[]> {
-  const errorEvents = await db
+  const rows = await db
     .select({
-      properties: events.properties,
-      created_at: events.created_at,
+      message: sql<string>`COALESCE(properties->>'message', 'Unknown error')`,
+      count: sql<number>`COUNT(*)::int`,
+      firstSeen: sql<string>`to_char(MIN(${events.created_at}), 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+      lastSeen: sql<string>`to_char(MAX(${events.created_at}), 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+      source: sql<string>`properties->>'source'`,
     })
     .from(events)
-    .where(
-      and(
-        buildEventFilters(siteId, dateRange),
-        eq(events.name, "js_error")
-      )
-    );
+    .where(and(buildEventFilters(siteId, dateRange), eq(events.name, 'js_error')))
+    .groupBy(sql`properties->>'message'`, sql`properties->>'source'`)
+    .orderBy(sql`COUNT(*) DESC`)
+    .limit(limit);
 
-  const errorMap = new Map<
-    string,
-    { count: number; firstSeen: string; lastSeen: string; source?: string }
-  >();
-
-  errorEvents.forEach((e) => {
-    const props = e.properties as Record<string, unknown>;
-    const message = (props.message as string) || "Unknown error";
-    const ts = new Date(e.created_at).toISOString();
-    const source = (props.source as string) || undefined;
-
-    const existing = errorMap.get(message);
-    if (!existing) {
-      errorMap.set(message, { count: 1, firstSeen: ts, lastSeen: ts, source });
-    } else {
-      existing.count += 1;
-      if (ts < existing.firstSeen) existing.firstSeen = ts;
-      if (ts > existing.lastSeen) existing.lastSeen = ts;
-    }
-  });
-
-  return Array.from(errorMap.entries())
-    .map(([message, data]) => ({ message, ...data }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit);
+  return rows.map((r) => ({
+    message: r.message,
+    count: r.count,
+    firstSeen: r.firstSeen,
+    lastSeen: r.lastSeen,
+    source: r.source || undefined,
+  }));
 }
 
 // ============================================================
@@ -919,69 +770,29 @@ export async function getCampaignPerformance(
 ): Promise<CampaignPerformance[]> {
   const rows = await db
     .select({
-      utm_source: sessions.utm_source,
-      utm_medium: sessions.utm_medium,
-      utm_campaign: sessions.utm_campaign,
-      page_count: sessions.page_count,
-      total_duration: sessions.total_duration,
-      is_bounce: sessions.is_bounce,
+      campaign: sessions.utm_campaign,
+      source: sessions.utm_source,
+      medium: sessions.utm_medium,
+      sessions: sql<number>`COUNT(*)::int`,
+      bounces: sql<number>`COUNT(*) FILTER (WHERE ${sessions.is_bounce} = true)::int`,
+      totalDuration: sql<number>`SUM(${sessions.total_duration})::int`,
+      totalPages: sql<number>`SUM(${sessions.page_count})::int`,
     })
     .from(sessions)
-    .where(
-      and(
-        buildSessionFilters(siteId, dateRange),
-        ne(sessions.utm_campaign, "")
-      )
-    );
+    .where(and(buildSessionFilters(siteId, dateRange), ne(sessions.utm_campaign, "")))
+    .groupBy(sessions.utm_campaign, sessions.utm_source, sessions.utm_medium)
+    .orderBy(sql`COUNT(*) DESC`)
+    .limit(limit);
 
-  if (rows.length === 0) return [];
-
-  const campaignMap = new Map<
-    string,
-    {
-      source: string;
-      medium: string;
-      sessions: number;
-      bounces: number;
-      totalDuration: number;
-      totalPages: number;
-    }
-  >();
-
-  rows.forEach((r) => {
-    const key = r.utm_campaign || "direct";
-    if (!campaignMap.has(key)) {
-      campaignMap.set(key, {
-        source: r.utm_source || "",
-        medium: r.utm_medium || "",
-        sessions: 0,
-        bounces: 0,
-        totalDuration: 0,
-        totalPages: 0,
-      });
-    }
-    const entry = campaignMap.get(key)!;
-    entry.sessions += 1;
-    if (r.is_bounce) entry.bounces += 1;
-    entry.totalDuration += r.total_duration;
-    entry.totalPages += r.page_count;
-  });
-
-  return Array.from(campaignMap.entries())
-    .map(([campaign, d]) => ({
-      campaign,
-      source: d.source,
-      medium: d.medium,
-      sessions: d.sessions,
-      bounceRate:
-        d.sessions > 0 ? Math.round((d.bounces / d.sessions) * 100) : 0,
-      avgDuration:
-        d.sessions > 0 ? Math.round(d.totalDuration / d.sessions) : 0,
-      pagesPerSession:
-        d.sessions > 0 ? Math.round((d.totalPages / d.sessions) * 10) / 10 : 0,
-    }))
-    .sort((a, b) => b.sessions - a.sessions)
-    .slice(0, limit);
+  return rows.map((r) => ({
+    campaign: r.campaign || "direct",
+    source: r.source || "",
+    medium: r.medium || "",
+    sessions: r.sessions,
+    bounceRate: r.sessions > 0 ? Math.round((r.bounces / r.sessions) * 100) : 0,
+    avgDuration: r.sessions > 0 ? Math.round(r.totalDuration / r.sessions) : 0,
+    pagesPerSession: r.sessions > 0 ? Math.round((r.totalPages / r.sessions) * 10) / 10 : 0,
+  }));
 }
 
 export async function getSourceQuality(
@@ -989,90 +800,51 @@ export async function getSourceQuality(
   dateRange: DateRange,
   limit = 10
 ): Promise<SourceQuality[]> {
+  const extractedHost = sql<string>`
+    CASE 
+      WHEN ${sessions.referrer} ~ '^https?://' 
+      THEN regexp_replace(${sessions.referrer}, '^https?://([^/]+).*$', '\\1')
+      ELSE ${sessions.referrer}
+    END
+  `;
+
   const rows = await db
     .select({
-      referrer: sessions.referrer,
-      visitor_id: sessions.visitor_id,
-      page_count: sessions.page_count,
-      total_duration: sessions.total_duration,
-      is_bounce: sessions.is_bounce,
+      source: extractedHost,
+      visitors: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
+      sessions: sql<number>`COUNT(*)::int`,
+      bounces: sql<number>`COUNT(*) FILTER (WHERE ${sessions.is_bounce} = true)::int`,
+      totalDuration: sql<number>`SUM(${sessions.total_duration})::int`,
+      totalPages: sql<number>`SUM(${sessions.page_count})::int`,
     })
     .from(sessions)
-    .where(
-      and(
-        buildSessionFilters(siteId, dateRange),
-        ne(sessions.referrer, "")
-      )
+    .where(and(buildSessionFilters(siteId, dateRange), ne(sessions.referrer, "")))
+    .groupBy(extractedHost)
+    .orderBy(sql`COUNT(DISTINCT ${sessions.visitor_id}) DESC`)
+    .limit(limit);
+
+  return rows.map((r) => {
+    const bounceRate = r.sessions > 0 ? Math.round((r.bounces / r.sessions) * 100) : 0;
+    const avgDuration = r.sessions > 0 ? Math.round(r.totalDuration / r.sessions) : 0;
+    const avgPages = r.sessions > 0 ? Math.round((r.totalPages / r.sessions) * 10) / 10 : 0;
+
+    const bounceScore = Math.max(0, 100 - bounceRate);
+    const durationScore = Math.min(avgDuration / 3, 100);
+    const pageScore = Math.min(avgPages * 20, 100);
+    const qualityScore = Math.round(
+      bounceScore * 0.4 + durationScore * 0.3 + pageScore * 0.3
     );
 
-  if (rows.length === 0) return [];
-
-  const sourceMap = new Map<
-    string,
-    {
-      visitors: Set<string>;
-      sessions: number;
-      bounces: number;
-      totalDuration: number;
-      totalPages: number;
-    }
-  >();
-
-  rows.forEach((r) => {
-    let domain = r.referrer || "";
-    try {
-      domain = new URL(domain).hostname;
-    } catch {
-      // use as-is
-    }
-    if (!sourceMap.has(domain)) {
-      sourceMap.set(domain, {
-        visitors: new Set(),
-        sessions: 0,
-        bounces: 0,
-        totalDuration: 0,
-        totalPages: 0,
-      });
-    }
-    const entry = sourceMap.get(domain)!;
-    entry.visitors.add(r.visitor_id);
-    entry.sessions += 1;
-    if (r.is_bounce) entry.bounces += 1;
-    entry.totalDuration += r.total_duration;
-    entry.totalPages += r.page_count;
-  });
-
-  return Array.from(sourceMap.entries())
-    .map(([source, d]) => {
-      const bounceRate =
-        d.sessions > 0 ? Math.round((d.bounces / d.sessions) * 100) : 0;
-      const avgDuration =
-        d.sessions > 0 ? Math.round(d.totalDuration / d.sessions) : 0;
-      const avgPages =
-        d.sessions > 0
-          ? Math.round((d.totalPages / d.sessions) * 10) / 10
-          : 0;
-
-      // Quality score: lower bounce + higher duration + more pages = better
-      const bounceScore = Math.max(0, 100 - bounceRate);
-      const durationScore = Math.min(avgDuration / 3, 100);
-      const pageScore = Math.min(avgPages * 20, 100);
-      const qualityScore = Math.round(
-        bounceScore * 0.4 + durationScore * 0.3 + pageScore * 0.3
-      );
-
-      return {
-        source,
-        visitors: d.visitors.size,
-        sessions: d.sessions,
-        bounceRate,
-        avgDuration,
-        avgPages,
-        qualityScore,
-      };
-    })
-    .sort((a, b) => b.qualityScore - a.qualityScore)
-    .slice(0, limit);
+    return {
+      source: r.source,
+      visitors: r.visitors,
+      sessions: r.sessions,
+      bounceRate,
+      avgDuration,
+      avgPages,
+      qualityScore,
+    };
+  }).sort((a, b) => b.qualityScore - a.qualityScore);
 }
 
 // ============================================================
@@ -1084,25 +856,21 @@ export async function getConnectionTypes(
   dateRange: DateRange
 ): Promise<ConnectionTypeEntry[]> {
   const rows = await db
-    .select({ connection_type: pageviews.connection_type })
+    .select({
+      type: pageviews.connection_type,
+      count: sql<number>`COUNT(*)::int`,
+    })
     .from(pageviews)
-    .where(buildPageviewFilters(siteId, dateRange));
+    .where(and(buildPageviewFilters(siteId, dateRange), ne(pageviews.connection_type, ""), sql`${pageviews.connection_type} IS NOT NULL`))
+    .groupBy(pageviews.connection_type)
+    .orderBy(sql`COUNT(*) DESC`);
 
-  const typeMap = new Map<string, number>();
-  rows.forEach((r) => {
-    const type = r.connection_type || "unknown";
-    typeMap.set(type, (typeMap.get(type) || 0) + 1);
-  });
-
-  const total = rows.length || 1;
-  return Array.from(typeMap.entries())
-    .filter(([type]) => type !== "unknown" && type !== "")
-    .map(([type, count]) => ({
-      type,
-      count,
-      percentage: Math.round((count / total) * 100),
-    }))
-    .sort((a, b) => b.count - a.count);
+  const total = rows.reduce((sum, r) => sum + r.count, 0) || 1;
+  return rows.map((r) => ({
+    type: r.type || "unknown",
+    count: r.count,
+    percentage: Math.round((r.count / total) * 100),
+  }));
 }
 
 // ============================================================
@@ -1113,67 +881,52 @@ export async function getRealtimeStats(
   siteId: string | "all"
 ): Promise<RealtimeStats> {
   const thirtyMinAgo = subMinutes(new Date(), 30);
+  const conditions = [gte(pageviews.created_at, thirtyMinAgo)];
+  if (siteId !== "all") conditions.push(eq(pageviews.site_id, siteId));
 
-  const conditions = [
-    gte(pageviews.created_at, thirtyMinAgo),
-  ];
-  if (siteId !== "all") {
-    conditions.push(eq(pageviews.site_id, siteId));
-  }
-
-  const rows = await db
+  const stats = await db
     .select({
-      visitor_id: pageviews.visitor_id,
-      url: pageviews.url,
-      country: pageviews.country,
-      is_bot: pageviews.is_bot,
+      activeVisitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id}) FILTER (WHERE ${pageviews.is_bot} = false)::int`,
+      pageviews30Min: sql<number>`COUNT(*) FILTER (WHERE ${pageviews.is_bot} = false)::int`,
+      activeBots: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id}) FILTER (WHERE ${pageviews.is_bot} = true)::int`,
+      botPageviews30Min: sql<number>`COUNT(*) FILTER (WHERE ${pageviews.is_bot} = true)::int`,
     })
     .from(pageviews)
     .where(and(...conditions));
 
-  const realRows = rows.filter((r) => !r.is_bot);
-  const botRows = rows.filter((r) => r.is_bot);
+  const activePages = await db
+    .select({
+      url: pageviews.url,
+      viewers: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
+    })
+    .from(pageviews)
+    .where(and(...conditions, eq(pageviews.is_bot, false)))
+    .groupBy(pageviews.url)
+    .orderBy(sql`COUNT(DISTINCT ${pageviews.visitor_id}) DESC`)
+    .limit(10);
 
-  const activeVisitors = new Set(realRows.map((r) => r.visitor_id)).size;
-  const activeBots = new Set(botRows.map((r) => r.visitor_id)).size;
-
-  // Active pages (only for real users to keep it clean)
-  const pageMap = new Map<string, Set<string>>();
-  realRows.forEach((r) => {
-    if (!pageMap.has(r.url)) pageMap.set(r.url, new Set());
-    pageMap.get(r.url)!.add(r.visitor_id);
-  });
-
-  const activePages = Array.from(pageMap.entries())
-    .map(([url, visitors]) => ({ url, viewers: visitors.size }))
-    .sort((a, b) => b.viewers - a.viewers)
-    .slice(0, 10);
-
-  // Top countries (only real users)
-  const countryMap = new Map<string, number>();
-  realRows.forEach((r) => {
-    const country = r.country || "";
-    if (country) {
-      countryMap.set(country, (countryMap.get(country) || 0) + 1);
-    }
-  });
-
-  const topCountries = Array.from(countryMap.entries())
-    .map(([country, count]) => ({
-      country,
-      flag: countryFlag(country),
-      count,
-    }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
+  const topCountriesRows = await db
+    .select({
+      country: pageviews.country,
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(pageviews)
+    .where(and(...conditions, eq(pageviews.is_bot, false), ne(pageviews.country, ""), sql`${pageviews.country} IS NOT NULL`))
+    .groupBy(pageviews.country)
+    .orderBy(sql`COUNT(*) DESC`)
+    .limit(5);
 
   return {
-    activeVisitors,
-    pageviewsLast30Min: realRows.length,
-    activeBots,
-    botPageviewsLast30Min: botRows.length,
-    activePages,
-    topCountries,
+    activeVisitors: stats[0]?.activeVisitors || 0,
+    pageviewsLast30Min: stats[0]?.pageviews30Min || 0,
+    activeBots: stats[0]?.activeBots || 0,
+    botPageviewsLast30Min: stats[0]?.botPageviews30Min || 0,
+    activePages: activePages.map((p) => ({ url: p.url, viewers: p.viewers })),
+    topCountries: topCountriesRows.map((c) => ({
+      country: c.country || "",
+      flag: countryFlag(c.country || ""),
+      count: c.count,
+    })),
   };
 }
 
@@ -1185,105 +938,82 @@ export async function getSeoOverview(
   siteId: string | "all",
   dateRange: DateRange
 ) {
-  const isHourly = differenceInDays(dateRange.to, dateRange.from) <= 2;
-  const dateFormatStr = isHourly ? "yyyy-MM-dd HH:00" : "yyyy-MM-dd";
-  // Define known search engine domains
-  const searchEngines = [
-    "google.com", "google.co", "bing.com", "yahoo.com", "duckduckgo.com", "yandex.ru", "yandex.com", "ecosia.org"
-  ];
+  const daysDiff = differenceInDays(dateRange.to, dateRange.from);
+  const bucket = daysDiff <= 2 ? 'hour' : 'day';
+  const truncatedDate = sql`DATE_TRUNC(${bucket}, ${pageviews.created_at})`;
+  const dateFormat = bucket === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
 
-  const pFilters = buildPageviewFilters(siteId, dateRange);
+  const isOrganicSql = sql<boolean>`
+    ${pageviews.referrer} ILIKE '%google.com%' OR
+    ${pageviews.referrer} ILIKE '%google.co%' OR
+    ${pageviews.referrer} ILIKE '%bing.com%' OR
+    ${pageviews.referrer} ILIKE '%yahoo.com%' OR
+    ${pageviews.referrer} ILIKE '%duckduckgo.com%' OR
+    ${pageviews.referrer} ILIKE '%yandex.ru%' OR
+    ${pageviews.referrer} ILIKE '%yandex.com%' OR
+    ${pageviews.referrer} ILIKE '%ecosia.org%'
+  `;
 
-  // Get all pageviews with referrers for the period
-  const pvRows = await db
+  const engineNameSql = sql<string>`
+    CASE
+      WHEN ${pageviews.referrer} ILIKE '%google.%' THEN 'Google'
+      WHEN ${pageviews.referrer} ILIKE '%bing.%' THEN 'Bing'
+      WHEN ${pageviews.referrer} ILIKE '%yahoo.%' THEN 'Yahoo'
+      WHEN ${pageviews.referrer} ILIKE '%duckduckgo.%' THEN 'Duckduckgo'
+      WHEN ${pageviews.referrer} ILIKE '%yandex.%' THEN 'Yandex'
+      WHEN ${pageviews.referrer} ILIKE '%ecosia.%' THEN 'Ecosia'
+      ELSE 'Other'
+    END
+  `;
+
+  // Main overview stats
+  const stats = await db
     .select({
-      url: pageviews.url,
-      referrer: pageviews.referrer,
-      visitor_id: pageviews.visitor_id,
-      created_at: pageviews.created_at,
+      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
+      pageviews: sql<number>`COUNT(*)::int`,
     })
     .from(pageviews)
-    .where(pFilters);
+    .where(and(buildPageviewFilters(siteId, dateRange), isOrganicSql));
 
-  let organicVisitors = new Set<string>();
-  let organicPageviews = 0;
-  
-  const landingPagesMap = new Map<string, { views: number; visitors: Set<string> }>();
-  const enginesMap = new Map<string, { views: number; visitors: Set<string> }>();
-  const trendMap = new Map<string, Set<string>>();
+  // Top search engines
+  const topEngines = await db
+    .select({
+      engine: engineNameSql,
+      views: sql<number>`COUNT(*)::int`,
+      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
+    })
+    .from(pageviews)
+    .where(and(buildPageviewFilters(siteId, dateRange), isOrganicSql))
+    .groupBy(engineNameSql)
+    .orderBy(sql`COUNT(DISTINCT ${pageviews.visitor_id}) DESC`);
 
-  pvRows.forEach((row) => {
-    if (!row.referrer) return;
-    
-    // Check if referrer matches a search engine
-    let isOrganic = false;
-    let engineFound = "Other";
-    const refLower = row.referrer.toLowerCase();
-    
-    for (const engine of searchEngines) {
-      if (refLower.includes(engine)) {
-        isOrganic = true;
-        engineFound = engine.split('.')[0];
-        engineFound = engineFound.charAt(0).toUpperCase() + engineFound.slice(1);
-        break;
-      }
-    }
+  // Top landing pages
+  const topLandingPages = await db
+    .select({
+      url: pageviews.url,
+      views: sql<number>`COUNT(*)::int`,
+      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
+    })
+    .from(pageviews)
+    .where(and(buildPageviewFilters(siteId, dateRange), isOrganicSql))
+    .groupBy(pageviews.url)
+    .orderBy(sql`COUNT(DISTINCT ${pageviews.visitor_id}) DESC`)
+    .limit(50);
 
-    if (isOrganic) {
-      organicVisitors.add(row.visitor_id);
-      organicPageviews++;
-
-      // Engines
-      if (!enginesMap.has(engineFound)) {
-        enginesMap.set(engineFound, { views: 0, visitors: new Set() });
-      }
-      const eStats = enginesMap.get(engineFound)!;
-      eStats.views++;
-      eStats.visitors.add(row.visitor_id);
-
-      // Landing Pages
-      const path = new URL(row.url, "http://dummy").pathname;
-      if (!landingPagesMap.has(path)) {
-        landingPagesMap.set(path, { views: 0, visitors: new Set() });
-      }
-      const pStats = landingPagesMap.get(path)!;
-      pStats.views++;
-      pStats.visitors.add(row.visitor_id);
-
-      // Trend
-      const dateStr = format(new Date(row.created_at), dateFormatStr);
-      if (!trendMap.has(dateStr)) trendMap.set(dateStr, new Set());
-      trendMap.get(dateStr)!.add(row.visitor_id);
-    }
-  });
-
-  const topEngines = Array.from(enginesMap.entries())
-    .map(([engine, stats]) => ({
-      engine,
-      views: stats.views,
-      visitors: stats.visitors.size,
-    }))
-    .sort((a, b) => b.visitors - a.visitors);
-
-  const topLandingPages = Array.from(landingPagesMap.entries())
-    .map(([url, stats]) => ({
-      url,
-      views: stats.views,
-      visitors: stats.visitors.size,
-    }))
-    .sort((a, b) => b.visitors - a.visitors)
-    .slice(0, 50);
-
-  const timeseries = Array.from(trendMap.entries())
-    .map(([date, vSet]) => ({
-      date,
-      visitors: vSet.size,
-    }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+  // Timeseries
+  const timeseries = await db
+    .select({
+      date: sql<string>`to_char(${truncatedDate}, ${dateFormat})`,
+      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
+    })
+    .from(pageviews)
+    .where(and(buildPageviewFilters(siteId, dateRange), isOrganicSql))
+    .groupBy(truncatedDate)
+    .orderBy(truncatedDate);
 
   return {
-    organicVisitors: organicVisitors.size,
-    organicPageviews,
+    organicVisitors: stats[0]?.visitors || 0,
+    organicPageviews: stats[0]?.pageviews || 0,
     topEngines,
     topLandingPages,
     timeseries,

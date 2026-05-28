@@ -2,24 +2,30 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { funnels, goalConversions, sessions } from "@/lib/db/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const siteId = searchParams.get("siteId");
+  const siteId = searchParams.get("siteId") || "all";
   const fromStr = searchParams.get("from");
   const toStr = searchParams.get("to");
 
-  if (!siteId) return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
+  // 1. Verify Site UUID exists in database (or is "all")
+  const exists = await verifySiteExists(siteId);
+  if (!exists) return siteNotFoundResponse();
 
-  const to = toStr ? new Date(toStr) : new Date();
-  const from = fromStr ? new Date(fromStr) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  if (toStr && !toStr.includes('T')) {
-    to.setHours(23, 59, 59, 999);
-  }
+  // 2. Safely parse and validate date range
+  const dateRange = parseDateRange(fromStr, toStr);
+  if (!dateRange) return invalidDateResponse();
+
+  const { from, to } = dateRange;
 
   try {
     // 1. Fetch site funnels
-    const siteFunnels = await db.select().from(funnels).where(eq(funnels.site_id, siteId));
+    const siteFunnels = siteId === "all"
+      ? await db.select().from(funnels)
+      : await db.select().from(funnels).where(eq(funnels.site_id, siteId));
+
     if (siteFunnels.length === 0) {
       return NextResponse.json([]);
     }
@@ -47,7 +53,7 @@ export async function GET(request: NextRequest) {
       .from(goalConversions)
       .where(
         and(
-          eq(goalConversions.site_id, siteId),
+          siteId === "all" ? undefined : eq(goalConversions.site_id, siteId),
           gte(goalConversions.created_at, from),
           lte(goalConversions.created_at, to)
         )

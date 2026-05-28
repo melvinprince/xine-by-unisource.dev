@@ -18,24 +18,23 @@ import {
  * Aggregates all dashboard overview data into a single response.
  * Query params: ?siteId=all&from=2026-01-01&to=2026-03-09
  */
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse } from "@/lib/api-helpers";
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get("siteId") || "all";
   const fromStr = searchParams.get("from");
   const toStr = searchParams.get("to");
 
-  // Default to last 30 days
-  const to = toStr ? new Date(toStr) : new Date();
-  const from = fromStr
-    ? new Date(fromStr)
-    : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  // 1. Verify Site UUID exists in database (or is "all")
+  const exists = await verifySiteExists(siteId);
+  if (!exists) return siteNotFoundResponse();
 
-  // Set end of day only for date-only strings (not full ISO timestamps)
-  if (toStr && !toStr.includes('T')) {
-    to.setHours(23, 59, 59, 999);
-  }
+  // 2. Safely parse and validate date range
+  const dateRange = parseDateRange(fromStr, toStr);
+  if (!dateRange) return invalidDateResponse();
 
-  const dateRange = { from, to };
+  const { from, to } = dateRange;
 
   try {
     const [

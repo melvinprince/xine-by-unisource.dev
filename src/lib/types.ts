@@ -293,3 +293,11 @@ export interface PagesPerSessionBucket {
   percentage: number;
 }
 
+export interface CohortRow {
+  cohortWeek: string | Date;
+  totalUsers: number;
+  weekNumber: number;
+  returnedUsers: number;
+}
+
+

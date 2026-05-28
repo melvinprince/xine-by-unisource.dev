@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { sites, siteSettings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
+import { uuidSchema } from "@/lib/validation";
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ apiKey: string }> }
@@ -20,6 +22,11 @@ export async function GET(
 
     if (!apiKey) {
       return NextResponse.json({ error: "API key required" }, { status: 400, headers });
+    }
+
+    const keyValidation = uuidSchema.safeParse(apiKey);
+    if (!keyValidation.success) {
+      return NextResponse.json({ error: "Invalid API key format" }, { status: 400, headers });
     }
 
     // Get site by API key
