@@ -8,7 +8,6 @@ import { useGSAP } from '@gsap/react';
 import ThemeToggle from './ThemeToggle';
 import {
   LayoutDashboard,
-  Globe,
   Settings,
   LogOut,
   ChevronLeft,
@@ -28,26 +27,54 @@ import {
   Repeat,
   Bell,
   Search,
+  Play,
 } from 'lucide-react';
 
 gsap.registerPlugin(useGSAP);
 
-const navItems = [
-  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: "/dashboard/realtime", label: "Realtime", icon: Radio },
-  { href: "/dashboard/analytics", label: "Analytics", icon: Activity },
-  { href: "/dashboard/performance", label: "Performance", icon: Gauge },
-  { href: "/dashboard/behavior", label: "Behavior", icon: MousePointerClick },
-  { href: "/dashboard/acquisition", label: "Acquisition", icon: Megaphone },
-  { href: "/dashboard/seo", label: "SEO", icon: Search },
-  { href: "/dashboard/goals", label: "Goals", icon: Target },
-  { href: "/dashboard/retention", label: "Retention", icon: Repeat },
-  { href: "/dashboard/funnels", label: "Funnels", icon: Filter },
-  { href: "/dashboard/events", label: "Events", icon: Zap },
-  { href: "/dashboard/annotations", label: "Annotations", icon: Tag },
-  { href: "/dashboard/monitors", label: "Monitors", icon: Bell },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
-  { href: '/dashboard/debug', label: 'Debug', icon: Bug },
+/* ── Navigation grouped by purpose ───────────────────────── */
+const navGroups = [
+  {
+    label: 'Core Analytics',
+    items: [
+      { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
+      { href: '/dashboard/realtime', label: 'Realtime', icon: Radio },
+      { href: '/dashboard/analytics', label: 'Analytics', icon: Activity },
+    ],
+  },
+  {
+    label: 'User Insights',
+    items: [
+      { href: '/dashboard/behavior', label: 'Behavior', icon: MousePointerClick },
+      { href: '/dashboard/retention', label: 'Retention', icon: Repeat },
+      { href: '/dashboard/replay', label: 'Session Replay', icon: Play },
+    ],
+  },
+  {
+    label: 'Conversion',
+    items: [
+      { href: '/dashboard/goals', label: 'Goals', icon: Target },
+      { href: '/dashboard/funnels', label: 'Funnels', icon: Filter },
+      { href: '/dashboard/events', label: 'Events', icon: Zap },
+    ],
+  },
+  {
+    label: 'Performance & SEO',
+    items: [
+      { href: '/dashboard/performance', label: 'Web Vitals', icon: Gauge },
+      { href: '/dashboard/seo', label: 'SEO', icon: Search },
+      { href: '/dashboard/acquisition', label: 'Acquisition', icon: Megaphone },
+      { href: '/dashboard/monitors', label: 'Monitors', icon: Bell },
+    ],
+  },
+  {
+    label: 'Configuration',
+    items: [
+      { href: '/dashboard/annotations', label: 'Annotations', icon: Tag },
+      { href: '/dashboard/settings', label: 'Settings', icon: Settings },
+      { href: '/dashboard/debug', label: 'Debug', icon: Bug },
+    ],
+  },
 ];
 
 interface SidebarProps {
@@ -55,7 +82,7 @@ interface SidebarProps {
   onCollapse?: (collapsed: boolean) => void;
 }
 
-export default function Sidebar({ sites = [], onCollapse }: SidebarProps) {
+export default function Sidebar({ onCollapse }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
@@ -65,9 +92,9 @@ export default function Sidebar({ sites = [], onCollapse }: SidebarProps) {
   useGSAP(
     () => {
       gsap.fromTo(
-        '.sidebar-nav-item',
-        { x: -20, opacity: 0 },
-        { x: 0, opacity: 1, duration: 0.4, stagger: 0.06, ease: 'power2.out', delay: 0.3 }
+        '.nav-item',
+        { x: -16, opacity: 0 },
+        { x: 0, opacity: 1, duration: 0.35, stagger: 0.03, ease: 'power2.out', delay: 0.2 }
       );
     },
     { scope: sidebarRef }
@@ -114,9 +141,6 @@ export default function Sidebar({ sites = [], onCollapse }: SidebarProps) {
     if (href === '/dashboard') return pathname === '/dashboard';
     return pathname.startsWith(href);
   };
-
-  const isSiteActive = (siteId: string) =>
-    pathname === `/dashboard/${siteId}`;
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -175,7 +199,7 @@ export default function Sidebar({ sites = [], onCollapse }: SidebarProps) {
           bottom: 0,
           width: collapsed ? 72 : 260,
           background: 'var(--color-bg-base)',
-          // borderRight: '1px solid var(--color-border-subtle)',
+          borderRight: '1px solid var(--color-border-subtle)',
           display: 'flex',
           flexDirection: 'column',
           zIndex: 50,
@@ -190,8 +214,8 @@ export default function Sidebar({ sites = [], onCollapse }: SidebarProps) {
             display: 'flex',
             alignItems: 'center',
             gap: '0.75rem',
-            // borderBottom: '1px solid var(--color-border-subtle)',
             minHeight: '64px',
+            borderBottom: '1px solid var(--color-border-subtle)',
           }}
         >
           <div
@@ -260,142 +284,49 @@ export default function Sidebar({ sites = [], onCollapse }: SidebarProps) {
           </button>
         </div>
 
-        {/* Nav */}
+        {/* Navigation */}
         <nav
           style={{
             flex: 1,
-            padding: '0.75rem',
+            padding: '0.5rem 0.75rem',
             overflowY: 'auto',
             overflowX: 'hidden',
           }}
         >
-          <div
-            style={{
-              marginBottom: '0.5rem',
-              padding: collapsed
-                ? '0.25rem 0'
-                : '0.25rem 0.75rem',
-            }}
-          >
-            {!collapsed && (
-              <span
-                style={{
-                  fontSize: '0.6875rem',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                  color: 'var(--color-text-muted)',
-                }}
-              >
-                Navigation
-              </span>
-            )}
-          </div>
+          {navGroups.map((group) => (
+            <div key={group.label}>
+              {/* Group Label */}
+              {!collapsed && (
+                <div className="nav-group-label">
+                  {group.label}
+                </div>
+              )}
+              {collapsed && (
+                <div style={{ height: '1px', background: 'var(--color-border-subtle)', margin: '0.75rem 0.5rem 0.5rem' }} />
+              )}
 
-          {navItems.map((item) => {
-            const active = isActive(item.href);
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="sidebar-nav-item"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                  padding: collapsed
-                    ? '0.625rem 0'
-                    : '0.625rem 0.75rem',
-                  justifyContent: collapsed ? 'center' : 'flex-start',
-                  marginBottom: '0.25rem',
-                  borderRadius: 'var(--radius-md)',
-                  color: active
-                    ? 'var(--color-accent)'
-                    : 'var(--color-text-secondary)',
-                  background: active
-                    ? 'var(--color-accent-subtle)'
-                    : 'transparent',
-                  textDecoration: 'none',
-                  fontSize: '0.875rem',
-                  fontWeight: active ? 600 : 400,
-                  transition:
-                    'all 0.2s cubic-bezier(0.4,0,0.2,1)',
-                  whiteSpace: 'nowrap',
-                }}
-                title={collapsed ? item.label : undefined}
-              >
-                <Icon size={20} style={{ flexShrink: 0 }} />
-                {!collapsed && item.label}
-              </Link>
-            );
-          })}
-
-          {/* Sites Section */}
-          {sites.length > 0 && (
-            <>
-              <div
-                style={{
-                  marginTop: '1.25rem',
-                  marginBottom: '0.5rem',
-                  padding: collapsed
-                    ? '0.25rem 0'
-                    : '0.25rem 0.75rem',
-                }}
-              >
-                {!collapsed && (
-                  <span
-                    style={{
-                      fontSize: '0.6875rem',
-                      fontWeight: 600,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                      color: 'var(--color-text-muted)',
-                    }}
-                  >
-                    Sites
-                  </span>
-                )}
-              </div>
-              {sites.map((site) => {
-                const active = isSiteActive(site.id);
+              {/* Group Items */}
+              {group.items.map((item) => {
+                const active = isActive(item.href);
+                const Icon = item.icon;
                 return (
                   <Link
-                    key={site.id}
-                    href={`/dashboard/${site.id}`}
-                    className="sidebar-nav-item"
+                    key={item.href}
+                    href={item.href}
+                    className={`nav-item ${active ? 'active' : ''}`}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.75rem',
-                      padding: collapsed
-                        ? '0.625rem 0'
-                        : '0.625rem 0.75rem',
                       justifyContent: collapsed ? 'center' : 'flex-start',
-                      marginBottom: '0.25rem',
-                      borderRadius: 'var(--radius-md)',
-                      color: active
-                        ? 'var(--color-accent)'
-                        : 'var(--color-text-secondary)',
-                      background: active
-                        ? 'var(--color-accent-subtle)'
-                        : 'transparent',
-                      textDecoration: 'none',
-                      fontSize: '0.875rem',
-                      fontWeight: active ? 600 : 400,
-                      transition:
-                        'all 0.2s cubic-bezier(0.4,0,0.2,1)',
-                      whiteSpace: 'nowrap',
+                      padding: collapsed ? '0.5rem 0' : undefined,
                     }}
-                    title={collapsed ? site.name : undefined}
+                    title={collapsed ? item.label : undefined}
                   >
-                    <Globe size={18} style={{ flexShrink: 0 }} />
-                    {!collapsed && site.name}
+                    <Icon size={18} style={{ flexShrink: 0 }} />
+                    {!collapsed && item.label}
                   </Link>
                 );
               })}
-            </>
-          )}
+            </div>
+          ))}
         </nav>
 
         {/* Bottom Section */}
@@ -417,7 +348,7 @@ export default function Sidebar({ sites = [], onCollapse }: SidebarProps) {
               justifyContent: collapsed ? 'center' : 'flex-start',
               gap: '0.75rem',
               width: '100%',
-              padding: '0.625rem 0.75rem',
+              padding: '0.5rem 0.75rem',
               marginBottom: '0.25rem',
               background: 'none',
               border: 'none',
@@ -441,7 +372,7 @@ export default function Sidebar({ sites = [], onCollapse }: SidebarProps) {
               justifyContent: collapsed ? 'center' : 'flex-start',
               gap: '0.75rem',
               width: '100%',
-              padding: '0.625rem 0.75rem',
+              padding: '0.5rem 0.75rem',
               background: 'none',
               border: 'none',
               color: 'var(--color-danger)',
@@ -456,23 +387,6 @@ export default function Sidebar({ sites = [], onCollapse }: SidebarProps) {
           </button>
         </div>
       </aside>
-
-      <style jsx global>{`
-        @media (max-width: 768px) {
-          .sidebar-mobile-toggle {
-            display: flex !important;
-          }
-          .sidebar-container {
-            transform: translateX(-280px);
-          }
-          .sidebar-collapse-btn {
-            display: none !important;
-          }
-          .sidebar-mobile-close {
-            display: flex !important;
-          }
-        }
-      `}</style>
     </>
   );
 }

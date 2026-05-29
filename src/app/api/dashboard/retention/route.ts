@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
-import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse } from "@/lib/api-helpers";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, parseFilters } from "@/lib/api-helpers";
+import { filterStore } from "@/lib/filter-store";
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,21 +21,62 @@ export async function GET(request: NextRequest) {
     if (!dateRange) return invalidDateResponse();
 
     const { from, to } = dateRange;
+    const filters = parseFilters(searchParams);
 
     const siteFilter = siteId === "all" ? sql`` : sql`AND site_id = ${siteId}`;
     const dateFilter = sql`started_at >= ${from} AND started_at <= ${to}`;
+
+    const extraConditions: string[] = [];
+    if (filters) {
+      if (filters.countries && filters.countries.length > 0) {
+        const list = filters.countries.map(c => `'${c.replace(/'/g, "''")}'`).join(",");
+        extraConditions.push(`AND country IN (${list})`);
+      }
+      if (filters.browsers && filters.browsers.length > 0) {
+        const list = filters.browsers.map(b => `'${b.replace(/'/g, "''")}'`).join(",");
+        extraConditions.push(`AND browser IN (${list})`);
+      }
+      if (filters.devices && filters.devices.length > 0) {
+        const deviceList = filters.devices;
+        const hasDesktop = deviceList.includes("desktop");
+        const list = deviceList.map(d => `'${d.replace(/'/g, "''")}'`).join(",");
+        if (hasDesktop) {
+          extraConditions.push(`AND (LOWER(device) IN (${list}) OR device IS NULL)`);
+        } else {
+          extraConditions.push(`AND LOWER(device) IN (${list})`);
+        }
+      }
+      if (filters.sources && filters.sources.length > 0) {
+        const matchers = filters.sources.map(s => {
+          const cleanSource = s.replace(/'/g, "''");
+          return `(
+            CASE 
+              WHEN referrer ~ '^https?://' 
+              THEN regexp_replace(referrer, '^https?://([^/]+).*$', '\\1')
+              ELSE referrer
+            END
+          ) = '${cleanSource}'`;
+        }).join(" OR ");
+        extraConditions.push(`AND (${matchers})`);
+      }
+      if (filters.pages && filters.pages.length > 0) {
+        const list = filters.pages.map(p => `'${p.replace(/'/g, "''")}'`).join(",");
+        extraConditions.push(`AND entry_page IN (${list})`);
+      }
+    }
+    const extraFilterSql = sql.raw(extraConditions.join(" "));
 
     const result = await db.execute(sql`
       WITH Cohorts AS (
         SELECT visitor_id, DATE_TRUNC('week', MIN(started_at)) as cohort_week
         FROM sessions
-        WHERE ${dateFilter} ${siteFilter}
+        WHERE ${dateFilter} ${siteFilter} ${extraFilterSql}
         GROUP BY visitor_id
       ),
       Activity AS (
         SELECT visitor_id, DATE_TRUNC('week', started_at) as activity_week
         FROM sessions
-        WHERE ${dateFilter} ${siteFilter}
+        WHERE ${dateFilter} ${siteFilter} ${extraFilterSql}
       ),
       CohortSize AS (
         SELECT cohort_week, COUNT(DISTINCT visitor_id) as total_users

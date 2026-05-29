@@ -7,9 +7,11 @@
 
 import { db } from "./db";
 import { pageviews, events, sessions } from "./db/schema";
-import { eq, gte, lte, ne, and, sql, desc } from "drizzle-orm";
+import { eq, gte, lte, ne, and, sql, desc, inArray, or, isNull } from "drizzle-orm";
 import { subDays, subMinutes, differenceInDays } from "date-fns";
 import { buildDateExpr } from "./query-helpers";
+import { filterStore } from "./filter-store";
+import type { DimensionFilters } from "./api-helpers";
 import type {
   DateRange,
   SessionAnalytics,
@@ -57,7 +59,54 @@ function countryFlag(code: string): string {
   return String.fromCodePoint(...codePoints);
 }
 
-function buildSessionFilters(siteId: string | "all", dateRange: DateRange) {
+function applyDimensionFilters(
+  conditions: any[],
+  table: typeof pageviews | typeof events | typeof sessions,
+  filters?: DimensionFilters
+) {
+  const activeFilters = filters || filterStore.getStore();
+  if (!activeFilters) return;
+
+  if (activeFilters.countries && activeFilters.countries.length > 0 && "country" in table) {
+    conditions.push(inArray((table as any).country, activeFilters.countries)!);
+  }
+  if (activeFilters.browsers && activeFilters.browsers.length > 0 && "browser" in table) {
+    conditions.push(inArray((table as any).browser, activeFilters.browsers)!);
+  }
+  if (activeFilters.devices && activeFilters.devices.length > 0 && "device" in table) {
+    const deviceList = activeFilters.devices;
+    const hasDesktop = deviceList.includes("desktop");
+    if (hasDesktop) {
+      conditions.push(
+        or(
+          inArray(sql`LOWER(${(table as any).device})`, deviceList)!,
+          isNull((table as any).device)
+        )!
+      );
+    } else {
+      conditions.push(inArray(sql`LOWER(${(table as any).device})`, deviceList)!);
+    }
+  }
+  if (activeFilters.sources && activeFilters.sources.length > 0 && "referrer" in table) {
+    const extractedHostExpr = sql<string>`
+      CASE 
+        WHEN ${(table as any).referrer} ~ '^https?://' 
+        THEN regexp_replace(${(table as any).referrer}, '^https?://([^/]+).*$', '\\1')
+        ELSE ${(table as any).referrer}
+      END
+    `;
+    conditions.push(inArray(extractedHostExpr, activeFilters.sources)!);
+  }
+  if (activeFilters.pages && activeFilters.pages.length > 0) {
+    if ("url" in table) {
+      conditions.push(inArray((table as any).url, activeFilters.pages)!);
+    } else if ("entry_page" in table) {
+      conditions.push(inArray((table as any).entry_page, activeFilters.pages)!);
+    }
+  }
+}
+
+function buildSessionFilters(siteId: string | "all", dateRange: DateRange, filters?: DimensionFilters) {
   const conditions = [
     gte(sessions.started_at, dateRange.from),
     lte(sessions.started_at, dateRange.to),
@@ -66,10 +115,11 @@ function buildSessionFilters(siteId: string | "all", dateRange: DateRange) {
   if (siteId !== "all") {
     conditions.push(eq(sessions.site_id, siteId));
   }
+  applyDimensionFilters(conditions, sessions, filters);
   return and(...conditions);
 }
 
-function buildEventFilters(siteId: string | "all", dateRange: DateRange) {
+function buildEventFilters(siteId: string | "all", dateRange: DateRange, filters?: DimensionFilters) {
   const conditions = [
     gte(events.created_at, dateRange.from),
     lte(events.created_at, dateRange.to),
@@ -78,10 +128,11 @@ function buildEventFilters(siteId: string | "all", dateRange: DateRange) {
   if (siteId !== "all") {
     conditions.push(eq(events.site_id, siteId));
   }
+  applyDimensionFilters(conditions, events, filters);
   return and(...conditions);
 }
 
-function buildPageviewFilters(siteId: string | "all", dateRange: DateRange) {
+function buildPageviewFilters(siteId: string | "all", dateRange: DateRange, filters?: DimensionFilters) {
   const conditions = [
     gte(pageviews.created_at, dateRange.from),
     lte(pageviews.created_at, dateRange.to),
@@ -90,6 +141,7 @@ function buildPageviewFilters(siteId: string | "all", dateRange: DateRange) {
   if (siteId !== "all") {
     conditions.push(eq(pageviews.site_id, siteId));
   }
+  applyDimensionFilters(conditions, pageviews, filters);
   return and(...conditions);
 }
 
@@ -875,6 +927,7 @@ export async function getRealtimeStats(
   const thirtyMinAgo = subMinutes(new Date(), 30);
   const conditions = [gte(pageviews.created_at, thirtyMinAgo)];
   if (siteId !== "all") conditions.push(eq(pageviews.site_id, siteId));
+  applyDimensionFilters(conditions, pageviews);
 
   const stats = await db
     .select({

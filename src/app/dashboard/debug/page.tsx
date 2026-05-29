@@ -15,6 +15,8 @@ import {
     ToggleLeft,
     ToggleRight,
 } from 'lucide-react';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
 
 interface DiagnosticsData {
     timestamp: string;
@@ -116,7 +118,7 @@ export default function DebugPage() {
     const cardStyle: React.CSSProperties = {
         background: 'var(--color-bg-raised)',
         border: '1px solid var(--color-border-subtle)',
-        borderRadius: 'var(--radius-lg, 12px)',
+        borderRadius: 'var(--radius-lg)',
         padding: '1.25rem',
         display: 'flex',
         flexDirection: 'column',
@@ -200,7 +202,7 @@ export default function DebugPage() {
                         background: 'var(--color-accent)',
                         color: '#fff',
                         border: 'none',
-                        borderRadius: 'var(--radius-md, 8px)',
+                        borderRadius: 'var(--radius-md)',
                         cursor: 'pointer',
                         fontWeight: 600,
                     }}
@@ -214,154 +216,146 @@ export default function DebugPage() {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* Page Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        width: '40px', height: '40px',
-                        borderRadius: 'var(--radius-md, 8px)',
-                        background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
-                    }}>
-                        <Bug size={22} color="#fff" />
-                    </div>
-                    <div>
-                        <h1 style={{ margin: 0, fontSize: '1.375rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                            Server Diagnostics
-                        </h1>
-                        <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-                            {lastFetched ? `Last fetched: ${lastFetched.toLocaleTimeString()}` : 'Loading...'}
-                        </p>
-                    </div>
-                </div>
+            <PageHeader
+                title="Debug"
+                description={lastFetched ? `Server diagnostics and database health · Last fetched: ${lastFetched.toLocaleTimeString()}` : 'Server diagnostics and database health'}
+                icon={<Bug size={20} />}
+                actions={
+                    <>
+                        {/* Auto-refresh toggle */}
+                        <button
+                            onClick={() => setAutoRefresh(!autoRefresh)}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                padding: '0.5rem 0.875rem',
+                                background: autoRefresh ? 'rgba(34, 197, 94, 0.15)' : 'var(--color-bg-raised)',
+                                color: autoRefresh ? '#22c55e' : 'var(--color-text-secondary)',
+                                border: `1px solid ${autoRefresh ? 'rgba(34, 197, 94, 0.3)' : 'var(--color-border-subtle)'}`,
+                                borderRadius: 'var(--radius-md)',
+                                cursor: 'pointer',
+                                fontSize: '0.8125rem',
+                                fontWeight: 500,
+                                transition: 'all 0.2s ease',
+                            }}
+                        >
+                            {autoRefresh ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+                            Auto (10s)
+                        </button>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    {/* Auto-refresh toggle */}
-                    <button
-                        onClick={() => setAutoRefresh(!autoRefresh)}
-                        style={{
-                            display: 'flex', alignItems: 'center', gap: '0.5rem',
-                            padding: '0.5rem 0.875rem',
-                            background: autoRefresh ? 'rgba(34, 197, 94, 0.15)' : 'var(--color-bg-raised)',
-                            color: autoRefresh ? '#22c55e' : 'var(--color-text-secondary)',
-                            border: `1px solid ${autoRefresh ? 'rgba(34, 197, 94, 0.3)' : 'var(--color-border-subtle)'}`,
-                            borderRadius: 'var(--radius-md, 8px)',
-                            cursor: 'pointer',
-                            fontSize: '0.8125rem',
-                            fontWeight: 500,
-                            transition: 'all 0.2s ease',
-                        }}
-                    >
-                        {autoRefresh ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
-                        Auto (10s)
-                    </button>
-
-                    {/* Manual refresh */}
-                    <button
-                        onClick={fetchDiagnostics}
-                        disabled={loading}
-                        style={{
-                            display: 'flex', alignItems: 'center', gap: '0.5rem',
-                            padding: '0.5rem 1rem',
-                            background: 'var(--color-accent)',
-                            color: '#fff',
-                            border: 'none',
-                            borderRadius: 'var(--radius-md, 8px)',
-                            cursor: loading ? 'wait' : 'pointer',
-                            fontSize: '0.8125rem',
-                            fontWeight: 600,
-                            opacity: loading ? 0.7 : 1,
-                            transition: 'all 0.2s ease',
-                        }}
-                    >
-                        <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-                        {loading ? 'Loading...' : 'Refresh'}
-                    </button>
-                </div>
-            </div>
+                        {/* Manual refresh */}
+                        <button
+                            onClick={fetchDiagnostics}
+                            disabled={loading}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                padding: '0.5rem 1rem',
+                                background: 'var(--color-accent)',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: 'var(--radius-md)',
+                                cursor: loading ? 'wait' : 'pointer',
+                                fontSize: '0.8125rem',
+                                fontWeight: 600,
+                                opacity: loading ? 0.7 : 1,
+                                transition: 'all 0.2s ease',
+                            }}
+                        >
+                            <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+                            {loading ? 'Loading...' : 'Refresh'}
+                        </button>
+                    </>
+                }
+            />
 
             {data && (
                 <>
                     {/* Row 1: Connection + Server Info */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1rem' }}>
-                        {/* DB Connection */}
-                        <div style={cardStyle}>
-                            <div style={headerStyle}><Database size={14} /> Database</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                <span style={badgeStyle(data.dbConnected ? 'green' : 'red')}>
-                                    {data.dbConnected
-                                        ? <><CheckCircle size={12} /> Connected</>
-                                        : <><XCircle size={12} /> Disconnected</>}
-                                </span>
-                            </div>
-                            <div style={labelStyle}>Host: {data.dbHost}</div>
-                            <div style={labelStyle}>Database: {data.dbName}</div>
-                            {data.dbConnectionError && (
-                                <div style={{
-                                    padding: '0.5rem 0.75rem',
-                                    background: 'rgba(239, 68, 68, 0.1)',
-                                    borderRadius: 'var(--radius-md, 8px)',
-                                    fontSize: '0.75rem',
-                                    color: '#ef4444',
-                                    wordBreak: 'break-all',
-                                }}>
-                                    {data.dbConnectionError}
+                    <div className="glass-card" style={{ padding: '1.5rem' }}>
+                        <SectionHeader title="Server & Connection" description="Database, time, and environment info" />
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1rem' }}>
+                            {/* DB Connection */}
+                            <div style={cardStyle}>
+                                <div style={headerStyle}><Database size={14} /> Database</div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                    <span style={badgeStyle(data.dbConnected ? 'green' : 'red')}>
+                                        {data.dbConnected
+                                            ? <><CheckCircle size={12} /> Connected</>
+                                            : <><XCircle size={12} /> Disconnected</>}
+                                    </span>
                                 </div>
-                            )}
-                        </div>
-
-                        {/* Server Time */}
-                        <div style={cardStyle}>
-                            <div style={headerStyle}><Clock size={14} /> Server Time</div>
-                            <div style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--color-text-primary)', fontFamily: 'monospace' }}>
-                                {new Date(data.timestamp).toLocaleString()}
+                                <div style={labelStyle}>Host: {data.dbHost}</div>
+                                <div style={labelStyle}>Database: {data.dbName}</div>
+                                {data.dbConnectionError && (
+                                    <div style={{
+                                        padding: '0.5rem 0.75rem',
+                                        background: 'rgba(239, 68, 68, 0.1)',
+                                        borderRadius: 'var(--radius-md)',
+                                        fontSize: '0.75rem',
+                                        color: '#ef4444',
+                                        wordBreak: 'break-all',
+                                    }}>
+                                        {data.dbConnectionError}
+                                    </div>
+                                )}
                             </div>
-                            <div style={labelStyle}>UTC: {data.serverTimeUTC}</div>
-                            <div style={labelStyle}>Local: {data.serverTimeLocal}</div>
-                        </div>
 
-                        {/* Environment */}
-                        <div style={cardStyle}>
-                            <div style={headerStyle}><Server size={14} /> Environment</div>
-                            <div style={rowStyle}>
-                                <span style={{ color: 'var(--color-text-muted)' }}>Node.js</span>
-                                <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontFamily: 'monospace' }}>{data.nodeVersion}</span>
+                            {/* Server Time */}
+                            <div style={cardStyle}>
+                                <div style={headerStyle}><Clock size={14} /> Server Time</div>
+                                <div style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--color-text-primary)', fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums' }}>
+                                    {new Date(data.timestamp).toLocaleString()}
+                                </div>
+                                <div style={labelStyle}>UTC: {data.serverTimeUTC}</div>
+                                <div style={labelStyle}>Local: {data.serverTimeLocal}</div>
                             </div>
-                            <div style={rowStyle}>
-                                <span style={{ color: 'var(--color-text-muted)' }}>Environment</span>
-                                <span style={badgeStyle(data.nodeEnv === 'production' ? 'green' : 'red')}>{data.nodeEnv}</span>
+
+                            {/* Environment */}
+                            <div style={cardStyle}>
+                                <div style={headerStyle}><Server size={14} /> Environment</div>
+                                <div style={rowStyle}>
+                                    <span style={{ color: 'var(--color-text-muted)' }}>Node.js</span>
+                                    <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontFamily: 'monospace' }}>{data.nodeVersion}</span>
+                                </div>
+                                <div style={rowStyle}>
+                                    <span style={{ color: 'var(--color-text-muted)' }}>Environment</span>
+                                    <span style={badgeStyle(data.nodeEnv === 'production' ? 'green' : 'red')}>{data.nodeEnv}</span>
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     {/* Row 2: Table Counts */}
                     {data.tableCounts && (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '1rem' }}>
-                            <div style={cardStyle}>
-                                <div style={headerStyle}><Globe size={14} /> Sites</div>
-                                <div style={valueStyle}>{data.tableCounts.sites.toLocaleString()}</div>
-                            </div>
-                            <div style={cardStyle}>
-                                <div style={headerStyle}><Activity size={14} /> Pageviews</div>
-                                <div style={valueStyle}>{data.tableCounts.pageviews.toLocaleString()}</div>
-                                {data.dataDateRange && (
-                                    <div style={labelStyle}>
-                                        {data.dataDateRange.earliest
-                                            ? `${new Date(data.dataDateRange.earliest).toLocaleDateString()} → ${new Date(data.dataDateRange.latest!).toLocaleDateString()}`
-                                            : 'No data'}
-                                    </div>
-                                )}
-                            </div>
-                            <div style={cardStyle}>
-                                <div style={headerStyle}><Zap size={14} /> Events</div>
-                                <div style={valueStyle}>{data.tableCounts.events.toLocaleString()}</div>
+                        <div className="glass-card" style={{ padding: '1.5rem' }}>
+                            <SectionHeader title="Table Counts" description="Database record totals" />
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '1rem' }}>
+                                <div style={cardStyle}>
+                                    <div style={headerStyle}><Globe size={14} /> Sites</div>
+                                    <div style={valueStyle}>{data.tableCounts.sites.toLocaleString()}</div>
+                                </div>
+                                <div style={cardStyle}>
+                                    <div style={headerStyle}><Activity size={14} /> Pageviews</div>
+                                    <div style={valueStyle}>{data.tableCounts.pageviews.toLocaleString()}</div>
+                                    {data.dataDateRange && (
+                                        <div style={labelStyle}>
+                                            {data.dataDateRange.earliest
+                                                ? `${new Date(data.dataDateRange.earliest).toLocaleDateString()} → ${new Date(data.dataDateRange.latest!).toLocaleDateString()}`
+                                                : 'No data'}
+                                        </div>
+                                    )}
+                                </div>
+                                <div style={cardStyle}>
+                                    <div style={headerStyle}><Zap size={14} /> Events</div>
+                                    <div style={valueStyle}>{data.tableCounts.events.toLocaleString()}</div>
+                                </div>
                             </div>
                         </div>
                     )}
 
                     {/* Row 3: Pageviews Last 7 Days */}
                     {data.pageviewsLast7Days && data.pageviewsLast7Days.length > 0 && (
-                        <div style={cardStyle}>
-                            <div style={headerStyle}><Activity size={14} /> Pageviews — Last 7 Days</div>
+                        <div className="glass-card" style={{ padding: '1.5rem' }}>
+                            <SectionHeader title="Pageviews — Last 7 Days" description="Daily pageview bar chart" />
                             <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.375rem', height: '120px', padding: '0.5rem 0' }}>
                                 {data.pageviewsLast7Days.slice().reverse().map((day, i) => {
                                     const max = Math.max(...data.pageviewsLast7Days!.map((d) => d.count), 1);
@@ -392,8 +386,8 @@ export default function DebugPage() {
 
                     {/* Row 4: Latest Pageviews Table */}
                     {data.latestPageviews && data.latestPageviews.length > 0 && (
-                        <div style={cardStyle}>
-                            <div style={headerStyle}><Activity size={14} /> Latest Pageviews</div>
+                        <div className="glass-card" style={{ padding: '1.5rem' }}>
+                            <SectionHeader title="Latest Pageviews" description={`${data.latestPageviews.length} most recent`} />
                             <div style={{ overflowX: 'auto' }}>
                                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <thead>
@@ -409,7 +403,7 @@ export default function DebugPage() {
                                     <tbody>
                                         {data.latestPageviews.map((pv) => (
                                             <tr key={pv.id}>
-                                                <td style={{ ...tableCellStyle, whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                                                <td style={{ ...tableCellStyle, whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
                                                     {formatTimeAgo(pv.created_at)}
                                                     <br />
                                                     <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
@@ -433,8 +427,8 @@ export default function DebugPage() {
 
                     {/* Row 5: Latest Events Table */}
                     {data.latestEvents && data.latestEvents.length > 0 && (
-                        <div style={cardStyle}>
-                            <div style={headerStyle}><Zap size={14} /> Latest Events</div>
+                        <div className="glass-card" style={{ padding: '1.5rem' }}>
+                            <SectionHeader title="Latest Events" description={`${data.latestEvents.length} most recent`} />
                             <div style={{ overflowX: 'auto' }}>
                                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <thead>
@@ -448,7 +442,7 @@ export default function DebugPage() {
                                     <tbody>
                                         {data.latestEvents.map((ev) => (
                                             <tr key={ev.id}>
-                                                <td style={{ ...tableCellStyle, whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                                                <td style={{ ...tableCellStyle, whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
                                                     {formatTimeAgo(ev.created_at)}
                                                     <br />
                                                     <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
@@ -468,8 +462,8 @@ export default function DebugPage() {
 
                     {/* Row 6: Registered Sites */}
                     {data.sites && data.sites.length > 0 && (
-                        <div style={cardStyle}>
-                            <div style={headerStyle}><Globe size={14} /> Registered Sites</div>
+                        <div className="glass-card" style={{ padding: '1.5rem' }}>
+                            <SectionHeader title="Registered Sites" description={`${data.sites.length} site${data.sites.length !== 1 ? 's' : ''} configured`} />
                             <div style={{ overflowX: 'auto' }}>
                                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <thead>
@@ -486,7 +480,7 @@ export default function DebugPage() {
                                                 <td style={{ ...tableCellStyle, fontWeight: 600, color: 'var(--color-text-primary)' }}>{site.name}</td>
                                                 <td style={{ ...tableCellStyle, color: 'var(--color-accent)' }}>{site.domain}</td>
                                                 <td style={{ ...tableCellStyle, fontFamily: 'monospace', fontSize: '0.75rem' }}>{site.id}</td>
-                                                <td style={{ ...tableCellStyle, whiteSpace: 'nowrap' }}>{new Date(site.created_at).toLocaleDateString()}</td>
+                                                <td style={{ ...tableCellStyle, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{new Date(site.created_at).toLocaleDateString()}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -496,29 +490,31 @@ export default function DebugPage() {
                     )}
 
                     {/* Raw JSON (collapsible) */}
-                    <details style={cardStyle}>
-                        <summary style={{
-                            cursor: 'pointer',
-                            fontSize: '0.8125rem',
-                            fontWeight: 600,
-                            color: 'var(--color-text-muted)',
-                            userSelect: 'none',
-                        }}>
-                            📋 Raw JSON Response
-                        </summary>
-                        <pre style={{
-                            background: 'var(--color-bg-base)',
-                            padding: '1rem',
-                            borderRadius: 'var(--radius-md, 8px)',
-                            overflow: 'auto',
-                            fontSize: '0.75rem',
-                            color: 'var(--color-text-secondary)',
-                            maxHeight: '400px',
-                            margin: '0.5rem 0 0',
-                        }}>
-                            {JSON.stringify(data, null, 2)}
-                        </pre>
-                    </details>
+                    <div className="glass-card" style={{ padding: '1.5rem' }}>
+                        <details>
+                            <summary style={{
+                                cursor: 'pointer',
+                                fontSize: '0.8125rem',
+                                fontWeight: 600,
+                                color: 'var(--color-text-muted)',
+                                userSelect: 'none',
+                            }}>
+                                📋 Raw JSON Response
+                            </summary>
+                            <pre style={{
+                                background: 'var(--color-bg-base)',
+                                padding: '1rem',
+                                borderRadius: 'var(--radius-md)',
+                                overflow: 'auto',
+                                fontSize: '0.75rem',
+                                color: 'var(--color-text-secondary)',
+                                maxHeight: '400px',
+                                margin: '0.5rem 0 0',
+                            }}>
+                                {JSON.stringify(data, null, 2)}
+                            </pre>
+                        </details>
+                    </div>
                 </>
             )}
 

@@ -15,6 +15,8 @@ import {
 import { LoadingState, ErrorState, EmptyState } from '@/components/DataStates';
 import HelpTooltip from '@/components/HelpTooltip';
 import FeatureGuide from '@/components/FeatureGuide';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
 import { useDashboardContext } from '@/components/DashboardContext';
 
 gsap.registerPlugin(useGSAP);
@@ -144,20 +146,17 @@ export default function GoalsPage() {
 
   return (
     <div ref={pageRef} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0 }}>
-            Goals & Conversions
-          </h2>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0.25rem 0 0' }}>
-            Track destination page views, custom events, and duration milestones.
-          </p>
-        </div>
-        <button className="btn-primary" onClick={openModal}>
-          <Plus size={18} /> Add Goal
-        </button>
-      </div>
+      {/* ── Page Header ────────────────────────────────────── */}
+      <PageHeader
+        title="Goals"
+        description="Track conversion goals and measure success"
+        icon={<Target size={20} />}
+        actions={
+          <button className="btn-primary" onClick={openModal}>
+            <Plus size={18} /> Add Goal
+          </button>
+        }
+      />
 
       {loading ? (
         <LoadingState message="Loading Goals..." />
@@ -202,61 +201,64 @@ export default function GoalsPage() {
           </button>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.25rem' }}>
-          {goals.map((goal) => {
-            const Icon = goal.type === 'pageview' ? MousePointer2 : goal.type === 'duration' ? Clock : Activity;
-            return (
-              <div
-                key={goal.id}
-                id={`goal-${goal.id}`}
-                className="goal-card glass-card hover-glow"
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  padding: '1.5rem',
-                  position: 'relative',
-                  overflow: 'hidden'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--color-accent-subtle)', color: 'var(--color-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon size={18} />
-                    </div>
-                    <div>
-                      <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{goal.name}</h4>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '0.125rem' }}>
-                        {goal.type}
+        <div>
+          <SectionHeader title="Active Goals" description={`${goals.length} goal${goals.length !== 1 ? 's' : ''} configured`} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.25rem' }}>
+            {goals.map((goal) => {
+              const Icon = goal.type === 'pageview' ? MousePointer2 : goal.type === 'duration' ? Clock : Activity;
+              return (
+                <div
+                  key={goal.id}
+                  id={`goal-${goal.id}`}
+                  className="goal-card glass-card hover-glow"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    padding: '1.5rem',
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--color-accent-subtle)', color: 'var(--color-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon size={18} />
+                      </div>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{goal.name}</h4>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '0.125rem' }}>
+                          {goal.type}
+                        </div>
                       </div>
                     </div>
+                    <button
+                      className="btn-ghost"
+                      onClick={() => handleDelete(goal.id)}
+                      style={{ padding: '0.375rem', color: 'var(--color-text-muted)', marginTop: '-0.25rem', marginRight: '-0.25rem' }}
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
-                  <button
-                    className="btn-ghost"
-                    onClick={() => handleDelete(goal.id)}
-                    style={{ padding: '0.375rem', color: 'var(--color-text-muted)', marginTop: '-0.25rem', marginRight: '-0.25rem' }}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-                
-                <div style={{ background: 'var(--color-bg-base)', padding: '0.75rem', borderRadius: 'var(--radius-md)', fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem', border: '1px solid var(--color-border-subtle)' }}>
-                  <span style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>{goal.condition.replace('_', ' ')}</span>
-                  <code style={{ background: 'var(--color-bg-raised)', padding: '0.125rem 0.375rem', borderRadius: '4px', color: 'var(--color-chart-1)' }}>{goal.target}</code>
-                </div>
+                  
+                  <div style={{ background: 'var(--color-bg-base)', padding: '0.75rem', borderRadius: 'var(--radius-md)', fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem', border: '1px solid var(--color-border-subtle)' }}>
+                    <span style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>{goal.condition.replace('_', ' ')}</span>
+                    <code style={{ background: 'var(--color-bg-raised)', padding: '0.125rem 0.375rem', borderRadius: '4px', color: 'var(--color-chart-1)' }}>{goal.target}</code>
+                  </div>
 
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1.25rem', marginTop: 'auto' }}>
-                  <div>
-                    <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem' }}>Conversions</div>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text-primary)', lineHeight: 1 }}>{goal.conversions.toLocaleString()}</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem' }}>Rate</div>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-accent)', lineHeight: 1 }}>{goal.rate}%</div>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1.25rem', marginTop: 'auto' }}>
+                    <div>
+                      <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem' }}>Conversions</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text-primary)', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{goal.conversions.toLocaleString()}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem' }}>Rate</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-accent)', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{goal.rate}%</div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 

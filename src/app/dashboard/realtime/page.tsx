@@ -11,12 +11,14 @@ import {
 } from 'lucide-react';
 import { LoadingState, EmptyState, ErrorState } from '@/components/DataStates';
 import HelpTooltip from '@/components/HelpTooltip';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
 import { useDashboardContext } from '@/components/DashboardContext';
 import { useRealtimeData } from '@/hooks/use-advanced-data';
 
 export default function RealtimePage() {
-  const { selectedSite } = useDashboardContext();
-  const { data, loading, error, refetch } = useRealtimeData(selectedSite);
+  const { selectedSite, activeFilters } = useDashboardContext();
+  const { data, loading, error, refetch } = useRealtimeData(selectedSite, activeFilters);
   const pulseRef = useRef<HTMLDivElement>(null);
   const countRef = useRef<HTMLSpanElement>(null);
 
@@ -55,6 +57,13 @@ export default function RealtimePage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* ── Page Header ─────────────────────────────────── */}
+      <PageHeader
+        title="Realtime"
+        description="Live visitor activity on your site"
+        icon={<Radio size={20} />}
+      />
+
       {/* ── Live Indicator ─────────────────────────────── */}
       <div
         className="glass-card"
@@ -65,6 +74,7 @@ export default function RealtimePage() {
           alignItems: 'center',
           gap: '1rem',
           textAlign: 'center',
+          animation: 'slide-down 0.2s ease-out',
         }}
       >
         {/* Pulsing dot */}
@@ -127,6 +137,7 @@ export default function RealtimePage() {
                 style={{
                   fontSize: '2.5rem',
                   fontWeight: 700,
+                  fontVariantNumeric: 'tabular-nums',
                   background:
                     'linear-gradient(135deg, var(--color-text-primary), var(--color-accent))',
                   WebkitBackgroundClip: 'text',
@@ -152,6 +163,7 @@ export default function RealtimePage() {
               style={{
                 fontSize: '2.5rem',
                 fontWeight: 700,
+                fontVariantNumeric: 'tabular-nums',
                 color: 'var(--color-chart-2)',
                 marginBottom: '0.25rem',
               }}
@@ -184,6 +196,7 @@ export default function RealtimePage() {
                 style={{
                   fontSize: '2.5rem',
                   fontWeight: 700,
+                  fontVariantNumeric: 'tabular-nums',
                   color: 'var(--color-warning, #f59e0b)',
                 }}
               >
@@ -205,6 +218,7 @@ export default function RealtimePage() {
               style={{
                 fontSize: '2.5rem',
                 fontWeight: 700,
+                fontVariantNumeric: 'tabular-nums',
                 color: 'var(--color-warning, #f59e0b)',
                 marginBottom: '0.25rem',
                 opacity: 0.8,
@@ -230,24 +244,26 @@ export default function RealtimePage() {
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))',
           gap: '1rem',
+          animation: 'slide-down 0.2s ease-out',
         }}
       >
         {/* Active Pages */}
         <div className="glass-card" style={{ padding: '1.25rem' }}>
-          <h3
+          <SectionHeader title="Active Pages" />
+          <div
             style={{
-              fontSize: '0.875rem',
-              fontWeight: 600,
-              color: 'var(--color-text-secondary)',
-              marginBottom: '1rem',
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
+              marginTop: '-0.75rem',
+              marginBottom: '1rem',
+              fontSize: '0.75rem',
+              color: 'var(--color-text-muted)',
             }}
           >
-            <Eye size={16} />
-            Active Pages <HelpTooltip title="Active Pages" content="Pages being viewed right now by your visitors. Updates every 30 seconds." />
-          </h3>
+            <Eye size={14} />
+            <HelpTooltip title="Active Pages" content="Pages being viewed right now by your visitors. Updates every 30 seconds." />
+          </div>
           {data.activePages.length > 0 ? (
             <div
               style={{
@@ -292,6 +308,7 @@ export default function RealtimePage() {
                     style={{
                       fontSize: '0.875rem',
                       fontWeight: 700,
+                      fontVariantNumeric: 'tabular-nums',
                       color: 'var(--color-text-primary)',
                       marginLeft: '0.75rem',
                       flexShrink: 0,
@@ -318,20 +335,21 @@ export default function RealtimePage() {
 
         {/* Countries */}
         <div className="glass-card" style={{ padding: '1.25rem' }}>
-          <h3
+          <SectionHeader title="Live by Country" />
+          <div
             style={{
-              fontSize: '0.875rem',
-              fontWeight: 600,
-              color: 'var(--color-text-secondary)',
-              marginBottom: '1rem',
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
+              marginTop: '-0.75rem',
+              marginBottom: '1rem',
+              fontSize: '0.75rem',
+              color: 'var(--color-text-muted)',
             }}
           >
-            <Globe size={16} />
-            Live by Country <HelpTooltip title="Live by Country" content="Geographic distribution of your current active visitors." />
-          </h3>
+            <Globe size={14} />
+            <HelpTooltip title="Live by Country" content="Geographic distribution of your current active visitors." />
+          </div>
           {data.topCountries.length > 0 ? (
             <div
               style={{
@@ -370,6 +388,7 @@ export default function RealtimePage() {
                     style={{
                       fontSize: '0.875rem',
                       fontWeight: 700,
+                      fontVariantNumeric: 'tabular-nums',
                       color: 'var(--color-chart-3)',
                     }}
                   >

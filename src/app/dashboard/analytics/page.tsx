@@ -13,6 +13,8 @@ import HeatmapChart from '@/components/charts/HeatmapChart';
 import FunnelChart from '@/components/charts/FunnelChart';
 import DataTable from '@/components/DataTable';
 import HelpTooltip from '@/components/HelpTooltip';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
 import { LoadingState, EmptyState, ErrorState } from '@/components/DataStates';
 import { useDashboardContext } from '@/components/DashboardContext';
 import { useAnalyticsData } from '@/hooks/use-advanced-data';
@@ -28,10 +30,11 @@ import {
 } from 'recharts';
 
 export default function AnalyticsPage() {
-  const { selectedSite, dateRange } = useDashboardContext();
+  const { selectedSite, dateRange, activeFilters } = useDashboardContext();
   const { data, loading, error, refetch } = useAnalyticsData(
     selectedSite,
-    dateRange
+    dateRange,
+    activeFilters
   );
 
   if (loading)
@@ -43,12 +46,20 @@ export default function AnalyticsPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* ── Page Header ─────────────────────────────────── */}
+      <PageHeader
+        title="Analytics"
+        description="Session analytics and engagement metrics"
+        icon={<Activity size={20} />}
+      />
+
       {/* ── Stat Cards ─────────────────────────────────── */}
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))',
           gap: '1rem',
+          animation: 'slide-down 0.2s ease-out',
         }}
       >
         <StatCard
@@ -91,17 +102,18 @@ export default function AnalyticsPage() {
       </div>
 
       {/* ── Sessions Trend ─────────────────────────────── */}
-      <div className="glass-card" style={{ padding: '1.25rem' }}>
-        <h3
+      <div className="glass-card" style={{ padding: '1.25rem', animation: 'slide-down 0.2s ease-out' }}>
+        <SectionHeader title="Sessions Over Time" />
+        <div
           style={{
-            fontSize: '0.875rem',
-            fontWeight: 600,
-            color: 'var(--color-text-secondary)',
+            marginTop: '-0.75rem',
             marginBottom: '1rem',
+            fontSize: '0.75rem',
+            color: 'var(--color-text-muted)',
           }}
         >
-          Sessions Over Time <HelpTooltip title="Sessions Over Time" content="Trend of total sessions per day. Shows how visitor engagement changes over the selected period." />
-        </h3>
+          <HelpTooltip title="Sessions Over Time" content="Trend of total sessions per day. Shows how visitor engagement changes over the selected period." />
+        </div>
         <ResponsiveContainer width="100%" height={250}>
           <AreaChart data={sessionTimeseries}>
             <defs>
@@ -146,6 +158,7 @@ export default function AnalyticsPage() {
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))',
           gap: '1rem',
+          animation: 'slide-down 0.2s ease-out',
         }}
       >
         <HeatmapChart data={heatmap} title="Visitor Activity by Hour & Day" />
@@ -154,16 +167,7 @@ export default function AnalyticsPage() {
           className="glass-card"
           style={{ padding: '1.25rem' }}
         >
-          <h3
-            style={{
-              fontSize: '0.875rem',
-              fontWeight: 600,
-              color: 'var(--color-text-secondary)',
-              marginBottom: '1rem',
-            }}
-          >
-            Engagement Breakdown
-          </h3>
+          <SectionHeader title="Engagement Breakdown" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {[
               { label: 'Highly Engaged (70-100)', value: engagement.highlyEngaged, color: 'var(--color-success)' },
@@ -176,7 +180,7 @@ export default function AnalyticsPage() {
                 <div key={item.label}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                     <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>{item.label}</span>
-                    <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: item.color }}>{item.value} ({pct}%)</span>
+                    <span style={{ fontSize: '0.8125rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: item.color }}>{item.value} ({pct}%)</span>
                   </div>
                   <div style={{ height: '6px', background: 'var(--color-bg-overlay)', borderRadius: 'var(--radius-full)' }}>
                     <div style={{ height: '100%', width: `${pct}%`, background: item.color, borderRadius: 'var(--radius-full)', transition: 'width 0.5s ease' }} />
@@ -192,12 +196,12 @@ export default function AnalyticsPage() {
             </h4>
             <div style={{ display: 'flex', gap: '2rem' }}>
               <div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-chart-1)' }}>{newVsReturning.newPercent}%</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>New ({newVsReturning.newVisitors})</div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-chart-1)' }}>{newVsReturning.newPercent}%</div>
+                <div style={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-muted)' }}>New ({newVsReturning.newVisitors})</div>
               </div>
               <div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-chart-3)' }}>{newVsReturning.returningPercent}%</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Returning ({newVsReturning.returningVisitors})</div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-chart-3)' }}>{newVsReturning.returningPercent}%</div>
+                <div style={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-muted)' }}>Returning ({newVsReturning.returningVisitors})</div>
               </div>
             </div>
           </div>
@@ -205,15 +209,17 @@ export default function AnalyticsPage() {
       </div>
 
       {/* ── Peak Hours ─────────────────────────────────── */}
-      <DataTable
-        title="Peak Traffic Hours"
-        delay={0.7}
-        columns={[
-          { key: 'label' as const, label: 'Hour', render: (v) => <span style={{ fontWeight: 600 }}>{String(v)}</span> },
-          { key: 'visitors' as const, label: 'Sessions', align: 'right' as const, render: (v) => Number(v).toLocaleString() },
-        ]}
-        data={peakHours}
-      />
+      <div style={{ animation: 'slide-down 0.2s ease-out' }}>
+        <DataTable
+          title="Peak Traffic Hours"
+          delay={0.7}
+          columns={[
+            { key: 'label' as const, label: 'Hour', render: (v) => <span style={{ fontWeight: 600 }}>{String(v)}</span> },
+            { key: 'visitors' as const, label: 'Sessions', align: 'right' as const, render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Number(v).toLocaleString()}</span> },
+          ]}
+          data={peakHours}
+        />
+      </div>
     </div>
   );
 }

@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { Users, Eye, Clock, ArrowDownUp, BarChart3 } from 'lucide-react';
 import StatCard from '@/components/StatCard';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
 import VisitorChart from '@/components/charts/VisitorChart';
 import DonutChart from '@/components/charts/DonutChart';
 import BarChart from '@/components/charts/BarChart';
@@ -35,16 +37,7 @@ export default function SiteDetailPage() {
   if (loading) return <LoadingState message="Loading site analytics..." />;
   if (error === 'Site not found') {
     return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '50vh',
-          flexDirection: 'column',
-          gap: '1rem',
-        }}
-      >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh', flexDirection: 'column', gap: '1rem' }}>
         <h2
           style={{
             fontSize: '1.5rem',
@@ -113,6 +106,13 @@ export default function SiteDetailPage() {
         </span>
       </div>
 
+      {/* Page Header */}
+      <PageHeader
+        title={site.name}
+        description={`Analytics overview for ${site.domain}`}
+        icon={<BarChart3 size={20} />}
+      />
+
       {!hasData ? (
         <EmptyState
           icon={<BarChart3 size={48} />}
@@ -122,13 +122,7 @@ export default function SiteDetailPage() {
       ) : (
         <>
           {/* ── Stat Cards ─────────────────────────────────── */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
-              gap: '1rem',
-            }}
-          >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '1rem' }}>
             <StatCard
               label="Visitors"
               value={stats.visitors}
@@ -162,60 +156,64 @@ export default function SiteDetailPage() {
           </div>
 
           {/* ── Visitor Trend ──────────────────────────────── */}
-          <VisitorChart data={data.timeseries} />
+          <div className="glass-card" style={{ padding: '1.5rem' }}>
+            <SectionHeader title="Visitor Trend" />
+            <VisitorChart data={data.timeseries} />
+          </div>
 
           {/* ── Custom Events ──────────────────────────────── */}
           {customEvents.length > 0 && (
-            <DataTable
-              title="Custom Events"
-              delay={0.5}
-              columns={[
-                {
-                  key: 'name' as const,
-                  label: 'Event Name',
-                  render: (v) => (
-                    <code
-                      style={{
-                        padding: '0.125rem 0.5rem',
-                        background: 'var(--color-bg-surface)',
-                        borderRadius: 'var(--radius-sm)',
-                        fontSize: '0.8125rem',
-                        color: 'var(--color-chart-2)',
-                        fontFamily: 'monospace',
-                      }}
-                    >
-                      {String(v)}
-                    </code>
-                  ),
-                },
-                {
-                  key: 'count' as const,
-                  label: 'Count',
-                  align: 'right' as const,
-                  render: (v) => Number(v).toLocaleString(),
-                },
-                {
-                  key: 'lastTriggered' as const,
-                  label: 'Last Triggered',
-                  align: 'right' as const,
-                  render: (v) => {
-                    const d = new Date(String(v));
-                    return d.toLocaleString();
+            <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <SectionHeader title="Custom Events" />
+              <DataTable
+                title="Custom Events"
+                delay={0.5}
+                columns={[
+                  {
+                    key: 'name' as const,
+                    label: 'Event Name',
+                    render: (v) => (
+                      <code
+                        style={{
+                          padding: '0.125rem 0.5rem',
+                          background: 'var(--color-bg-surface)',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: '0.8125rem',
+                          color: 'var(--color-chart-2)',
+                          fontFamily: 'monospace',
+                        }}
+                      >
+                        {String(v)}
+                      </code>
+                    ),
                   },
-                },
-              ]}
-              data={customEvents}
-            />
+                  {
+                    key: 'count' as const,
+                    label: 'Count',
+                    align: 'right' as const,
+                    render: (v) => (
+                      <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {Number(v).toLocaleString()}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'lastTriggered' as const,
+                    label: 'Last Triggered',
+                    align: 'right' as const,
+                    render: (v) => {
+                      const d = new Date(String(v));
+                      return d.toLocaleString();
+                    },
+                  },
+                ]}
+                data={customEvents}
+              />
+            </div>
           )}
 
           {/* ── Two-Column Tables ──────────────────────────── */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))',
-              gap: '1rem',
-            }}
-          >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))', gap: '1rem' }}>
             <DataTable
               title="Top Pages"
               delay={0.6}
@@ -229,12 +227,25 @@ export default function SiteDetailPage() {
                     </span>
                   ),
                 },
-                { key: 'views' as const, label: 'Views', align: 'right' as const },
+                {
+                  key: 'views' as const,
+                  label: 'Views',
+                  align: 'right' as const,
+                  render: (v) => (
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {Number(v).toLocaleString()}
+                    </span>
+                  ),
+                },
                 {
                   key: 'avgDuration' as const,
                   label: 'Duration',
                   align: 'right' as const,
-                  render: (v) => formatDuration(Number(v)),
+                  render: (v) => (
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {formatDuration(Number(v))}
+                    </span>
+                  ),
                 },
               ]}
               data={data.topPages}
@@ -255,12 +266,21 @@ export default function SiteDetailPage() {
                   key: 'visitors' as const,
                   label: 'Visitors',
                   align: 'right' as const,
+                  render: (v) => (
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {Number(v).toLocaleString()}
+                    </span>
+                  ),
                 },
                 {
                   key: 'percentage' as const,
                   label: '%',
                   align: 'right' as const,
-                  render: (v) => `${Number(v).toFixed(1)}%`,
+                  render: (v) => (
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {Number(v).toFixed(1)}%
+                    </span>
+                  ),
                 },
               ]}
               data={data.topSources}
@@ -268,15 +288,15 @@ export default function SiteDetailPage() {
           </div>
 
           {/* ── Three-Column Charts ────────────────────────── */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))',
-              gap: '1rem',
-            }}
-          >
-            <DonutChart data={data.deviceBreakdown} />
-            <BarChart data={data.browserStats} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1rem' }}>
+            <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <SectionHeader title="Devices" />
+              <DonutChart data={data.deviceBreakdown} />
+            </div>
+            <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <SectionHeader title="Browsers" />
+              <BarChart data={data.browserStats} />
+            </div>
             <DataTable
               title="Top Countries"
               delay={0.8}
@@ -297,7 +317,11 @@ export default function SiteDetailPage() {
                   key: 'visitors' as const,
                   label: 'Visitors',
                   align: 'right' as const,
-                  render: (v) => Number(v).toLocaleString(),
+                  render: (v) => (
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {Number(v).toLocaleString()}
+                    </span>
+                  ),
                 },
               ]}
               data={data.countryStats}

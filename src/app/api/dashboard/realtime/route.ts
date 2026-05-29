@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRealtimeStats } from "@/lib/queries-advanced";
-import { verifySiteExists, siteNotFoundResponse } from "@/lib/api-helpers";
+import { verifySiteExists, siteNotFoundResponse, parseFilters } from "@/lib/api-helpers";
+import { filterStore } from "@/lib/filter-store";
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,7 +12,8 @@ export async function GET(request: NextRequest) {
     const exists = await verifySiteExists(siteId);
     if (!exists) return siteNotFoundResponse();
 
-    const stats = await getRealtimeStats(siteId);
+    const filters = parseFilters(searchParams);
+    const stats = await filterStore.run(filters, () => getRealtimeStats(siteId));
 
     return NextResponse.json(stats, {
       headers: {

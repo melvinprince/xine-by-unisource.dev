@@ -7,6 +7,8 @@ import { Tag, Plus, Trash2, X } from 'lucide-react';
 import { LoadingState, ErrorState } from '@/components/DataStates';
 import HelpTooltip from '@/components/HelpTooltip';
 import FeatureGuide from '@/components/FeatureGuide';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
 import { useDashboardContext } from '@/components/DashboardContext';
 
 gsap.registerPlugin(useGSAP);
@@ -124,17 +126,17 @@ export default function AnnotationsPage() {
 
   return (
     <div ref={pageRef} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0 }}>
-            Chart Annotations <HelpTooltip title="Annotations" content="Timeline markers for significant events. Annotations help you correlate traffic changes with real-world events like deployments, campaigns, or outages." />
-          </h2>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0.25rem 0 0' }}>Document deployments, marketing campaigns, or site outages to trace metric impacts.</p>
-        </div>
-        <button className="btn-primary" onClick={openModal}>
-          <Plus size={18} /> Add Annotation
-        </button>
-      </div>
+      {/* Header */}
+      <PageHeader
+        title="Annotations"
+        description="Mark important events on your analytics timeline"
+        icon={<Tag size={20} />}
+        actions={
+          <button className="btn-primary" onClick={openModal}>
+            <Plus size={18} /> Add Annotation
+          </button>
+        }
+      />
 
       {loading ? (
         <LoadingState message="Loading Annotations..." />
@@ -179,27 +181,30 @@ export default function AnnotationsPage() {
           </button>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {annotations.map((ann) => (
-            <div key={ann.id} id={`annotation-${ann.id}`} className="annotation-card glass-card hover-glow" style={{ padding: '1.25rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <div style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-overlay)', border: '1px solid var(--color-border-subtle)' }}>
-                  <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-                    {new Date(ann.date).toLocaleDateString()}
-                  </span>
-                </div>
-                <div>
-                  <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>{ann.text}</h4>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-accent)', marginTop: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
-                    {ann.category}
+        <div className="glass-card" style={{ padding: '1.5rem' }}>
+          <SectionHeader title="Timeline Annotations" description={`${annotations.length} annotation${annotations.length !== 1 ? 's' : ''}`} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {annotations.map((ann) => (
+              <div key={ann.id} id={`annotation-${ann.id}`} className="annotation-card hover-glow" style={{ padding: '1.25rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--color-bg-overlay)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-subtle)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <div style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', background: 'var(--color-bg-base)', border: '1px solid var(--color-border-subtle)' }}>
+                    <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                      {new Date(ann.date).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>{ann.text}</h4>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-accent)', marginTop: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                      {ann.category}
+                    </div>
                   </div>
                 </div>
+                <button className="btn-ghost" onClick={() => handleDelete(ann.id)} style={{ padding: '0.5rem', color: 'var(--color-text-muted)' }}>
+                  <Trash2 size={16} />
+                </button>
               </div>
-              <button className="btn-ghost" onClick={() => handleDelete(ann.id)} style={{ padding: '0.5rem', color: 'var(--color-text-muted)' }}>
-                <Trash2 size={16} />
-              </button>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 

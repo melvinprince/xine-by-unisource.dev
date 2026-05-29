@@ -9,6 +9,8 @@ import WebVitalsGauge from '@/components/charts/WebVitalsGauge';
 import DataTable from '@/components/DataTable';
 import FunnelChart from '@/components/charts/FunnelChart';
 import HelpTooltip from '@/components/HelpTooltip';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
 import { LoadingState, EmptyState, ErrorState } from '@/components/DataStates';
 import { useDashboardContext } from '@/components/DashboardContext';
 import { usePerformanceData } from '@/hooks/use-advanced-data';
@@ -23,10 +25,11 @@ import {
 } from 'recharts';
 
 export default function PerformancePage() {
-  const { selectedSite, dateRange } = useDashboardContext();
+  const { selectedSite, dateRange, activeFilters } = useDashboardContext();
   const { data, loading, error, refetch } = usePerformanceData(
     selectedSite,
-    dateRange
+    dateRange,
+    activeFilters
   );
 
   if (loading) return <LoadingState message="Analyzing site performance..." />;
@@ -37,36 +40,39 @@ export default function PerformancePage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* ── Page Header ─────────────────────────────────── */}
+      <PageHeader
+        title="Web Vitals"
+        description="Core Web Vitals and performance metrics"
+        icon={<Gauge size={20} />}
+      />
+
       {/* ── Web Vitals Gauges ──────────────────────────── */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))',
-          gap: '1rem',
-        }}
-      >
-        {webVitals.map((vital) => (
-          <WebVitalsGauge
-            key={vital.metric}
-            metric={vital.metric}
-            value={vital.current}
-            rating={vital.rating}
-          />
-        ))}
+      <div style={{ animation: 'slide-down 0.2s ease-out' }}>
+        <div className="glass-card" style={{ padding: '1.25rem' }}>
+          <SectionHeader title="Core Web Vitals" description="Real-time performance scores from your visitors" />
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))',
+              gap: '1rem',
+            }}
+          >
+            {webVitals.map((vital) => (
+              <WebVitalsGauge
+                key={vital.metric}
+                metric={vital.metric}
+                value={vital.current}
+                rating={vital.rating}
+              />
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* ── Web Vital Trends ──────────────────────────── */}
-      <div className="glass-card" style={{ padding: '1.25rem' }}>
-        <h3
-          style={{
-            fontSize: '0.875rem',
-            fontWeight: 600,
-            color: 'var(--color-text-secondary)',
-            marginBottom: '1rem',
-          }}
-        >
-          Web Vitals Trend
-        </h3>
+      <div className="glass-card" style={{ padding: '1.25rem', animation: 'slide-down 0.2s ease-out' }}>
+        <SectionHeader title="Web Vitals Trend" description="Performance metrics over time" />
         {webVitals
           .filter((v) => v.data.length > 0)
           .slice(0, 3)
@@ -128,24 +134,25 @@ export default function PerformancePage() {
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))',
           gap: '1rem',
+          animation: 'slide-down 0.2s ease-out',
         }}
       >
         {/* Error Trend */}
         <div className="glass-card" style={{ padding: '1.25rem' }}>
-          <h3
+          <SectionHeader title="JS Errors Over Time" />
+          <div
             style={{
-              fontSize: '0.875rem',
-              fontWeight: 600,
-              color: 'var(--color-text-secondary)',
-              marginBottom: '1rem',
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
+              marginTop: '-0.75rem',
+              marginBottom: '1rem',
+              fontSize: '0.75rem',
+              color: 'var(--color-text-muted)',
             }}
           >
-            <AlertTriangle size={16} style={{ color: 'var(--color-danger)' }} />
-            JS Errors Over Time
-          </h3>
+            <AlertTriangle size={14} style={{ color: 'var(--color-danger)' }} />
+          </div>
           {errorTrend.length > 0 ? (
             <ResponsiveContainer width="100%" height={150}>
               <AreaChart data={errorTrend}>
@@ -207,83 +214,87 @@ export default function PerformancePage() {
 
       {/* ── Top Errors Table ──────────────────────────── */}
       {topErrors.length > 0 && (
-        <DataTable
-          title="Top JS Errors"
-          delay={0.6}
-          columns={[
-            {
-              key: 'message' as const,
-              label: 'Error',
-              render: (v) => (
-                <code
-                  style={{
-                    padding: '0.125rem 0.5rem',
-                    background: 'var(--color-danger-subtle)',
-                    borderRadius: 'var(--radius-sm)',
-                    fontSize: '0.75rem',
-                    color: 'var(--color-danger)',
-                    fontFamily: 'monospace',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {String(v)}
-                </code>
-              ),
-            },
-            { key: 'count' as const, label: 'Count', align: 'right' as const, render: (v) => Number(v).toLocaleString() },
-            {
-              key: 'lastSeen' as const,
-              label: 'Last Seen',
-              align: 'right' as const,
-              render: (v) => new Date(String(v)).toLocaleDateString(),
-            },
-          ]}
-          data={topErrors}
-        />
+        <div style={{ animation: 'slide-down 0.2s ease-out' }}>
+          <DataTable
+            title="Top JS Errors"
+            delay={0.6}
+            columns={[
+              {
+                key: 'message' as const,
+                label: 'Error',
+                render: (v) => (
+                  <code
+                    style={{
+                      padding: '0.125rem 0.5rem',
+                      background: 'var(--color-danger-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.75rem',
+                      color: 'var(--color-danger)',
+                      fontFamily: 'monospace',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {String(v)}
+                  </code>
+                ),
+              },
+              { key: 'count' as const, label: 'Count', align: 'right' as const, render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Number(v).toLocaleString()}</span> },
+              {
+                key: 'lastSeen' as const,
+                label: 'Last Seen',
+                align: 'right' as const,
+                render: (v) => new Date(String(v)).toLocaleDateString(),
+              },
+            ]}
+            data={topErrors}
+          />
+        </div>
       )}
 
       {/* ── Per-Page Web Vitals ────────────────────────── */}
       {vitalsByPage.length > 0 && (
-        <DataTable
-          title="Web Vitals by Page"
-          delay={0.7}
-          columns={[
-            {
-              key: 'url' as const,
-              label: 'Page',
-              render: (v) => (
-                <span style={{ color: 'var(--color-accent)', fontWeight: 500 }}>
-                  {String(v)}
-                </span>
-              ),
-            },
-            {
-              key: 'lcp' as const,
-              label: 'LCP',
-              align: 'right' as const,
-              render: (v) => (v != null ? `${v}ms` : '—'),
-            },
-            {
-              key: 'fcp' as const,
-              label: 'FCP',
-              align: 'right' as const,
-              render: (v) => (v != null ? `${v}ms` : '—'),
-            },
-            {
-              key: 'cls' as const,
-              label: 'CLS',
-              align: 'right' as const,
-              render: (v) => (v != null ? (Number(v) / 1000).toFixed(3) : '—'),
-            },
-            {
-              key: 'ttfb' as const,
-              label: 'TTFB',
-              align: 'right' as const,
-              render: (v) => (v != null ? `${v}ms` : '—'),
-            },
-          ]}
-          data={vitalsByPage}
-        />
+        <div style={{ animation: 'slide-down 0.2s ease-out' }}>
+          <DataTable
+            title="Web Vitals by Page"
+            delay={0.7}
+            columns={[
+              {
+                key: 'url' as const,
+                label: 'Page',
+                render: (v) => (
+                  <span style={{ color: 'var(--color-accent)', fontWeight: 500 }}>
+                    {String(v)}
+                  </span>
+                ),
+              },
+              {
+                key: 'lcp' as const,
+                label: 'LCP',
+                align: 'right' as const,
+                render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{v != null ? `${v}ms` : '—'}</span>,
+              },
+              {
+                key: 'fcp' as const,
+                label: 'FCP',
+                align: 'right' as const,
+                render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{v != null ? `${v}ms` : '—'}</span>,
+              },
+              {
+                key: 'cls' as const,
+                label: 'CLS',
+                align: 'right' as const,
+                render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{v != null ? (Number(v) / 1000).toFixed(3) : '—'}</span>,
+              },
+              {
+                key: 'ttfb' as const,
+                label: 'TTFB',
+                align: 'right' as const,
+                render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{v != null ? `${v}ms` : '—'}</span>,
+              },
+            ]}
+            data={vitalsByPage}
+          />
+        </div>
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useRef } from 'react';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { Zap, Download, TrendingUp, Hash, Users } from 'lucide-react';
@@ -8,6 +8,8 @@ import { LoadingState, ErrorState } from '@/components/DataStates';
 import HelpTooltip from '@/components/HelpTooltip';
 import FeatureGuide from '@/components/FeatureGuide';
 import StatCard from '@/components/StatCard';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
 import { useDashboardContext } from '@/components/DashboardContext';
 import VisitorChart from '@/components/charts/VisitorChart';
 
@@ -27,11 +29,12 @@ interface EventTimeseriesPoint {
 }
 
 export default function EventsPage() {
-  const { selectedSite, dateRange } = useDashboardContext();
+  const { selectedSite, dateRange, activeFilters } = useDashboardContext();
   const { data, loading, error, refetch } = useDashboardFetch<{ topEvents: EventTopItem[]; timeseries: EventTimeseriesPoint[] }>(
     '/api/dashboard/events',
     selectedSite,
-    dateRange
+    dateRange,
+    activeFilters
   );
 
   const pageRef = useRef<HTMLDivElement>(null);
@@ -76,19 +79,16 @@ export default function EventsPage() {
   return (
     <div ref={pageRef} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0 }}>
-            Custom Events <HelpTooltip title="Custom Events" content="Track specific user interactions using the SDK. Call wa.track('Event Name', { properties }) to record events." usage="Add wa.track('Sign Up', { plan: 'Pro' }) in your JavaScript code." />
-          </h2>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0.25rem 0 0' }}>
-            Track specific user interactions via the SDK <code style={{ background: 'var(--color-bg-surface)', padding: '0.125rem 0.375rem', borderRadius: '4px', fontSize: '0.75rem' }}>wa.track()</code> method.
-          </p>
-        </div>
-        <button className="btn-secondary" onClick={handleExport} disabled={!data || data.topEvents.length === 0}>
-          <Download size={16} style={{ marginRight: '0.5rem' }} /> Export CSV
-        </button>
-      </div>
+      <PageHeader
+        title="Events"
+        description="Custom event tracking and analytics"
+        icon={<Zap size={20} />}
+        actions={
+          <button className="btn-secondary" onClick={handleExport} disabled={!data || data.topEvents.length === 0}>
+            <Download size={16} style={{ marginRight: '0.5rem' }} /> Export CSV
+          </button>
+        }
+      />
 
       {loading ? (
         <LoadingState message="Loading Events Data..." />
@@ -159,26 +159,25 @@ export default function EventsPage() {
           </div>
 
           {/* Event Volume Trends Chart */}
-          <VisitorChart
-            title={
-              <>
-                <TrendingUp size={16} />
-                Event Volume Trends
-                <HelpTooltip title="Event Volume" content="Daily count of all custom events fired. Use this to spot trends or spikes in user interactions." />
-              </>
-            }
-            primaryDataKey="count"
-            primaryLabel="Events Fired"
-            data={data.timeseries.map(t => ({ date: t.date, count: t.count, pageviews: 0 })) as unknown as import('@/lib/types').TimeseriesPoint[]}
-          />
+          <div className="glass-card" style={{ padding: '1.5rem' }}>
+            <SectionHeader title="Event Volume Trends" />
+            <VisitorChart
+              title={
+                <>
+                  <TrendingUp size={16} />
+                  Event Volume Trends
+                  <HelpTooltip title="Event Volume" content="Daily count of all custom events fired. Use this to spot trends or spikes in user interactions." />
+                </>
+              }
+              primaryDataKey="count"
+              primaryLabel="Events Fired"
+              data={data.timeseries.map(t => ({ date: t.date, count: t.count, pageviews: 0 })) as unknown as import('@/lib/types').TimeseriesPoint[]}
+            />
+          </div>
 
           {/* Top Events Table */}
           <div className="event-card glass-card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Zap size={16} />
-              Top Events
-              <HelpTooltip title="Top Events" content="All custom events ranked by total count. Shows how many times each event was fired and by how many unique users." />
-            </h3>
+            <SectionHeader title="Top Events" />
             <div style={{ width: '100%', overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                 <thead>
@@ -205,10 +204,10 @@ export default function EventsPage() {
                           </div>
                         </td>
                         <td style={{ padding: '0.875rem 0', textAlign: 'right' }}>
-                          <span style={{ fontWeight: 600, fontSize: '0.9375rem', color: 'var(--color-text-primary)' }}>{event.count.toLocaleString()}</span>
+                          <span style={{ fontWeight: 600, fontSize: '0.9375rem', color: 'var(--color-text-primary)', fontVariantNumeric: 'tabular-nums' }}>{event.count.toLocaleString()}</span>
                         </td>
                         <td style={{ padding: '0.875rem 0 0.875rem 1rem', textAlign: 'right' }}>
-                          <span style={{ color: 'var(--color-text-secondary)' }}>{event.uniqueUsers.toLocaleString()}</span>
+                          <span style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{event.uniqueUsers.toLocaleString()}</span>
                         </td>
                       </tr>
                     );

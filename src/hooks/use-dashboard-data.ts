@@ -12,6 +12,7 @@ import type {
   CustomEvent,
   Site,
 } from '@/lib/types';
+import type { ActiveFilters } from '@/components/DashboardContext';
 
 interface DashboardData {
   stats: OverviewStats;
@@ -43,13 +44,24 @@ interface UseSiteDetailReturn {
   refetch: () => void;
 }
 
+function appendFilters(params: URLSearchParams, filters?: ActiveFilters) {
+  if (!filters) return;
+  Object.entries(filters).forEach(([key, values]) => {
+    if (values && values.length > 0) {
+      params.set(key, values.join(','));
+    }
+  });
+}
+
 export function useDashboardData(
   siteId: string,
-  dateRange: { from: string; to: string }
+  dateRange: { from: string; to: string },
+  filters?: ActiveFilters
 ): UseDashboardDataReturn {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const filterStr = filters ? JSON.stringify(filters) : '';
 
   const fetchData = useCallback(async () => {
     try {
@@ -60,6 +72,7 @@ export function useDashboardData(
         from: dateRange.from,
         to: dateRange.to,
       });
+      appendFilters(params, filters);
       const res = await fetch(`/api/dashboard/overview?${params}`);
       if (!res.ok) {
         throw new Error('Failed to fetch dashboard data');
@@ -71,7 +84,7 @@ export function useDashboardData(
     } finally {
       setLoading(false);
     }
-  }, [siteId, dateRange.from, dateRange.to]);
+  }, [siteId, dateRange.from, dateRange.to, filterStr]);
 
   useEffect(() => {
     fetchData();
@@ -82,11 +95,13 @@ export function useDashboardData(
 
 export function useSiteDetail(
   siteId: string,
-  dateRange: { from: string; to: string }
+  dateRange: { from: string; to: string },
+  filters?: ActiveFilters
 ): UseSiteDetailReturn {
   const [data, setData] = useState<SiteDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const filterStr = filters ? JSON.stringify(filters) : '';
 
   const fetchData = useCallback(async () => {
     try {
@@ -97,6 +112,7 @@ export function useSiteDetail(
         from: dateRange.from,
         to: dateRange.to,
       });
+      appendFilters(params, filters);
       const res = await fetch(`/api/dashboard/site-detail?${params}`);
       if (!res.ok) {
         if (res.status === 404) {
@@ -112,7 +128,7 @@ export function useSiteDetail(
     } finally {
       setLoading(false);
     }
-  }, [siteId, dateRange.from, dateRange.to]);
+  }, [siteId, dateRange.from, dateRange.to, filterStr]);
 
   useEffect(() => {
     fetchData();
@@ -124,11 +140,13 @@ export function useSiteDetail(
 export function useDashboardFetch<T>(
   endpoint: string,
   siteId: string,
-  dateRange?: { from: string; to: string }
+  dateRange?: { from: string; to: string },
+  filters?: ActiveFilters
 ) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const filterStr = filters ? JSON.stringify(filters) : '';
 
   const fetchData = useCallback(async () => {
     if (!siteId) return;
@@ -142,6 +160,7 @@ export function useDashboardFetch<T>(
         queryObj.to = dateRange.to;
       }
       const params = new URLSearchParams(queryObj);
+      appendFilters(params, filters);
       
       const res = await fetch(`${endpoint}?${params}`);
       if (!res.ok) {
@@ -155,7 +174,7 @@ export function useDashboardFetch<T>(
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endpoint, siteId, dateRange?.from, dateRange?.to]);
+  }, [endpoint, siteId, dateRange?.from, dateRange?.to, filterStr]);
 
   useEffect(() => {
     fetchData();

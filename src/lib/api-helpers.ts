@@ -61,3 +61,29 @@ export function invalidDateResponse() {
 export function siteNotFoundResponse() {
   return NextResponse.json({ error: "Site not found" }, { status: 404 });
 }
+
+export interface DimensionFilters {
+  countries?: string[];
+  browsers?: string[];
+  devices?: string[];
+  sources?: string[];
+  pages?: string[];
+}
+
+export function parseFilters(searchParams: URLSearchParams): DimensionFilters {
+  const getParamArray = (key: string) => {
+    const val = searchParams.get(key);
+    if (!val) return undefined;
+    const arr = val.split(",").map(v => decodeURIComponent(v).trim()).filter(Boolean);
+    return arr.length > 0 ? arr : undefined;
+  };
+
+  return {
+    countries: getParamArray("countries"),
+    browsers: getParamArray("browsers"),
+    devices: getParamArray("devices"),
+    sources: getParamArray("sources"),
+    pages: getParamArray("pages"),
+  };
+}
+

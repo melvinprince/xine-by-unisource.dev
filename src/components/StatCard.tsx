@@ -155,6 +155,7 @@ export default function StatCard({
             fontWeight: 700,
             color: 'var(--color-text-primary)',
             lineHeight: 1.1,
+            fontVariantNumeric: 'tabular-nums',
           }}
         >
           0

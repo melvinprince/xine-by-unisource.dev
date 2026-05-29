@@ -6,9 +6,11 @@
 
 import { db } from "./db";
 import { pageviews, events, sites, sessions } from "./db/schema";
-import { eq, gte, lte, ne, desc, sql, and } from "drizzle-orm";
+import { eq, gte, lte, ne, desc, sql, and, inArray, or, isNull } from "drizzle-orm";
 import { format, subDays, differenceInDays } from "date-fns";
 import { buildDateExpr } from "./query-helpers";
+import { filterStore } from "./filter-store";
+import type { DimensionFilters } from "./api-helpers";
 import type {
   Site,
   OverviewStats,
@@ -47,7 +49,12 @@ function countryFlag(code: string): string {
   return String.fromCodePoint(...codePoints);
 }
 
-function buildFilters(siteId: string | "all", dateRange: DateRange, table: typeof pageviews | typeof events) {
+export function buildFilters(
+  siteId: string | "all",
+  dateRange: DateRange,
+  table: typeof pageviews | typeof events,
+  filters?: DimensionFilters
+) {
   const conditions = [
     gte(table.created_at, dateRange.from),
     lte(table.created_at, dateRange.to),
@@ -57,8 +64,51 @@ function buildFilters(siteId: string | "all", dateRange: DateRange, table: typeo
   }
   // Exclude bot traffic from all dashboard metrics
   if ("is_bot" in table) {
-    conditions.push(eq((table as typeof pageviews).is_bot, false));
+    conditions.push(eq((table as any).is_bot, false));
   }
+
+  const activeFilters = filters || filterStore.getStore();
+
+  if (activeFilters) {
+    if (activeFilters.countries && activeFilters.countries.length > 0 && "country" in table) {
+      conditions.push(inArray((table as any).country, activeFilters.countries)!);
+    }
+    if (activeFilters.browsers && activeFilters.browsers.length > 0 && "browser" in table) {
+      conditions.push(inArray((table as any).browser, activeFilters.browsers)!);
+    }
+    if (activeFilters.devices && activeFilters.devices.length > 0 && "device" in table) {
+      const deviceList = activeFilters.devices;
+      const hasDesktop = deviceList.includes("desktop");
+      if (hasDesktop) {
+        conditions.push(
+          or(
+            inArray(sql`LOWER(${(table as any).device})`, deviceList)!,
+            isNull((table as any).device)
+          )!
+        );
+      } else {
+        conditions.push(inArray(sql`LOWER(${(table as any).device})`, deviceList)!);
+      }
+    }
+    if (activeFilters.sources && activeFilters.sources.length > 0 && "referrer" in table) {
+      const extractedHostExpr = sql<string>`
+        CASE 
+          WHEN ${(table as any).referrer} ~ '^https?://' 
+          THEN regexp_replace(${(table as any).referrer}, '^https?://([^/]+).*$', '\\1')
+          ELSE ${(table as any).referrer}
+        END
+      `;
+      conditions.push(inArray(extractedHostExpr, activeFilters.sources)!);
+    }
+    if (activeFilters.pages && activeFilters.pages.length > 0) {
+      if ("url" in table) {
+        conditions.push(inArray((table as any).url, activeFilters.pages)!);
+      } else if ("entry_page" in table) {
+        conditions.push(inArray((table as any).entry_page, activeFilters.pages)!);
+      }
+    }
+  }
+
   return and(...conditions);
 }
 
@@ -70,7 +120,8 @@ function buildFilters(siteId: string | "all", dateRange: DateRange, table: typeo
  */
 export async function getOverviewStats(
   siteId: string | "all",
-  dateRange: DateRange
+  dateRange: DateRange,
+  filters?: DimensionFilters
 ): Promise<OverviewStats> {
   const prevRange = getPreviousDateRange(dateRange);
 
@@ -81,14 +132,14 @@ export async function getOverviewStats(
       avgDuration: sql<number>`COALESCE(AVG(${pageviews.duration}), 0)::float`,
     })
     .from(pageviews)
-    .where(buildFilters(siteId, range, pageviews));
+    .where(buildFilters(siteId, range, pageviews, filters));
 
   const bounceQuery = (range: DateRange) => {
     const sub = db.select({
       cnt: sql<number>`COUNT(*)::int`.as('cnt'),
     })
     .from(pageviews)
-    .where(buildFilters(siteId, range, pageviews))
+    .where(buildFilters(siteId, range, pageviews, filters))
     .groupBy(pageviews.session_id)
     .as('sub');
 
@@ -135,7 +186,8 @@ export async function getOverviewStats(
  */
 export async function getVisitorTimeseries(
   siteId: string | "all",
-  dateRange: DateRange
+  dateRange: DateRange,
+  filters?: DimensionFilters
 ): Promise<TimeseriesPoint[]> {
   const dateExpr = buildDateExpr(dateRange, pageviews.created_at);
 
@@ -146,7 +198,7 @@ export async function getVisitorTimeseries(
       pageviews: sql<number>`COUNT(*)::int`,
     })
     .from(pageviews)
-    .where(buildFilters(siteId, dateRange, pageviews))
+    .where(buildFilters(siteId, dateRange, pageviews, filters))
     .groupBy(dateExpr)
     .orderBy(dateExpr);
 
@@ -159,7 +211,8 @@ export async function getVisitorTimeseries(
 export async function getTopPages(
   siteId: string | "all",
   dateRange: DateRange,
-  limit = 10
+  limit = 10,
+  filters?: DimensionFilters
 ): Promise<TopPage[]> {
   const rows = await db
     .select({
@@ -167,14 +220,21 @@ export async function getTopPages(
       views: sql<number>`COUNT(*)::int`,
       uniqueVisitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
       avgDuration: sql<number>`COALESCE(ROUND(AVG(${pageviews.duration})), 0)::int`,
+      siteIds: sql<string[]>`ARRAY_AGG(DISTINCT ${pageviews.site_id}::text)`,
     })
     .from(pageviews)
-    .where(buildFilters(siteId, dateRange, pageviews))
+    .where(buildFilters(siteId, dateRange, pageviews, filters))
     .groupBy(pageviews.url)
     .orderBy(sql`COUNT(*) DESC`)
     .limit(limit);
 
-  return rows;
+  return rows.map((r) => ({
+    url: r.url,
+    views: r.views,
+    uniqueVisitors: r.uniqueVisitors,
+    avgDuration: r.avgDuration,
+    siteIds: siteId === "all" ? r.siteIds : undefined,
+  }));
 }
 
 /**
@@ -183,9 +243,10 @@ export async function getTopPages(
 export async function getTopSources(
   siteId: string | "all",
   dateRange: DateRange,
-  limit = 10
+  limit = 10,
+  filters?: DimensionFilters
 ): Promise<TopSource[]> {
-  const filters = buildFilters(siteId, dateRange, pageviews);
+  const combinedFilters = buildFilters(siteId, dateRange, pageviews, filters);
 
   const extractedHost = sql<string>`
     CASE 
@@ -199,9 +260,10 @@ export async function getTopSources(
     .select({
       source: extractedHost,
       visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
+      siteIds: sql<string[]>`ARRAY_AGG(DISTINCT ${pageviews.site_id}::text)`,
     })
     .from(pageviews)
-    .where(and(filters, ne(pageviews.referrer, "")))
+    .where(and(combinedFilters, ne(pageviews.referrer, "")))
     .groupBy(extractedHost)
     .orderBy(sql`COUNT(DISTINCT ${pageviews.visitor_id}) DESC`)
     .limit(limit);
@@ -211,7 +273,7 @@ export async function getTopSources(
       total: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
     })
     .from(pageviews)
-    .where(buildFilters(siteId, dateRange, pageviews));
+    .where(buildFilters(siteId, dateRange, pageviews, filters));
 
   const total = totalVisitorsRow[0]?.total || 0;
 
@@ -219,6 +281,7 @@ export async function getTopSources(
     referrer: r.source,
     visitors: r.visitors,
     percentage: total > 0 ? Math.round((r.visitors / total) * 100) : 0,
+    siteIds: siteId === "all" ? r.siteIds : undefined,
   }));
 }
 
@@ -227,7 +290,8 @@ export async function getTopSources(
  */
 export async function getDeviceBreakdown(
   siteId: string | "all",
-  dateRange: DateRange
+  dateRange: DateRange,
+  filters?: DimensionFilters
 ): Promise<DeviceBreakdown> {
   const rows = await db
     .select({
@@ -235,7 +299,7 @@ export async function getDeviceBreakdown(
       count: sql<number>`COUNT(*)::int`,
     })
     .from(pageviews)
-    .where(buildFilters(siteId, dateRange, pageviews))
+    .where(buildFilters(siteId, dateRange, pageviews, filters))
     .groupBy(sql`LOWER(COALESCE(${pageviews.device}, 'desktop'))`);
 
   const breakdown: DeviceBreakdown = { desktop: 0, mobile: 0, tablet: 0 };
@@ -257,7 +321,8 @@ export async function getDeviceBreakdown(
 export async function getBrowserBreakdown(
   siteId: string | "all",
   dateRange: DateRange,
-  limit = 8
+  limit = 8,
+  filters?: DimensionFilters
 ): Promise<BrowserStat[]> {
   const rows = await db
     .select({
@@ -265,7 +330,7 @@ export async function getBrowserBreakdown(
       count: sql<number>`COUNT(*)::int`,
     })
     .from(pageviews)
-    .where(buildFilters(siteId, dateRange, pageviews))
+    .where(buildFilters(siteId, dateRange, pageviews, filters))
     .groupBy(sql`COALESCE(${pageviews.browser}, 'Unknown')`)
     .orderBy(sql`COUNT(*) DESC`)
     .limit(limit);
@@ -279,16 +344,17 @@ export async function getBrowserBreakdown(
 export async function getCountryBreakdown(
   siteId: string | "all",
   dateRange: DateRange,
-  limit = 10
+  limit = 10,
+  filters?: DimensionFilters
 ): Promise<CountryStat[]> {
-  const filters = buildFilters(siteId, dateRange, pageviews);
+  const combinedFilters = buildFilters(siteId, dateRange, pageviews, filters);
   const rows = await db
     .select({
       country: pageviews.country,
       visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
     })
     .from(pageviews)
-    .where(and(filters, ne(pageviews.country, "")))
+    .where(and(combinedFilters, ne(pageviews.country, "")))
     .groupBy(pageviews.country)
     .orderBy(sql`COUNT(DISTINCT ${pageviews.visitor_id}) DESC`)
     .limit(limit);
@@ -306,7 +372,8 @@ export async function getCountryBreakdown(
 export async function getTopEvents(
   siteId: string | "all",
   dateRange: DateRange,
-  limit = 10
+  limit = 10,
+  filters?: DimensionFilters
 ): Promise<CustomEvent[]> {
   const rows = await db
     .select({
@@ -315,7 +382,7 @@ export async function getTopEvents(
       lastTriggered: sql<string>`to_char(MAX(${events.created_at}), 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
     })
     .from(events)
-    .where(buildFilters(siteId, dateRange, events))
+    .where(buildFilters(siteId, dateRange, events, filters))
     .groupBy(events.name)
     .orderBy(sql`COUNT(*) DESC`)
     .limit(limit);

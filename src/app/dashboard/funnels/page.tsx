@@ -7,6 +7,8 @@ import { Filter, Plus, Trash2, X, PlusCircle, ArrowDown } from 'lucide-react';
 import { LoadingState, ErrorState } from '@/components/DataStates';
 import HelpTooltip from '@/components/HelpTooltip';
 import FeatureGuide from '@/components/FeatureGuide';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
 import { useDashboardContext } from '@/components/DashboardContext';
 import FunnelChart from '@/components/charts/FunnelChart';
 
@@ -157,15 +159,17 @@ export default function FunnelsPage() {
 
   return (
     <div ref={pageRef} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0 }}>Conversion Funnels <HelpTooltip title="Conversion Funnels" content="Define multi-step user journeys using goals. Track how many users complete each step and where they drop off." usage="Create goals first, then build funnels by chaining them as steps." /></h2>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0.25rem 0 0' }}>Analyze multi-step user journeys and identify drop-off points.</p>
-        </div>
-        <button className="btn-primary" onClick={openModal} disabled={goals.length === 0}>
-          <Plus size={18} /> Add Funnel
-        </button>
-      </div>
+      {/* ── Page Header ────────────────────────────────────── */}
+      <PageHeader
+        title="Funnels"
+        description="Multi-step conversion funnel analysis"
+        icon={<Filter size={20} />}
+        actions={
+          <button className="btn-primary" onClick={openModal} disabled={goals.length === 0}>
+            <Plus size={18} /> Add Funnel
+          </button>
+        }
+      />
 
       {loading ? (
         <LoadingState message="Loading Funnels..." />
@@ -230,39 +234,53 @@ export default function FunnelsPage() {
           )}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }}>
-          {funnels.map((funnel) => {
-            const chartData = (funnel.analytics || []).map(a => ({
-              label: a.name,
-              value: a.count,
-              percentage: a.dropoffFromPrevious > 0 ? -a.dropoffFromPrevious : 0, 
-            }));
-            
-            return (
-              <div key={funnel.id} id={`funnel-${funnel.id}`} className="funnel-card glass-card hover-glow" style={{ padding: '1.5rem', position: 'relative' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
-                  <div>
-                    <h4 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{funnel.name}</h4>
-                    <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginTop: '0.25rem' }}>
-                      {funnel.steps.length} steps defined
+        <div>
+          <SectionHeader
+            title="Conversion Funnels"
+            description={`${funnels.length} funnel${funnels.length !== 1 ? 's' : ''} configured`}
+            actions={
+              <HelpTooltip
+                title="Conversion Funnels"
+                content="Define multi-step user journeys using goals. Track how many users complete each step and where they drop off."
+                usage="Create goals first, then build funnels by chaining them as steps."
+              />
+            }
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }}>
+            {funnels.map((funnel) => {
+              const chartData = (funnel.analytics || []).map(a => ({
+                label: a.name,
+                value: a.count,
+                percentage: a.dropoffFromPrevious > 0 ? -a.dropoffFromPrevious : 0, 
+              }));
+              
+              return (
+                <div key={funnel.id} id={`funnel-${funnel.id}`} className="funnel-card glass-card hover-glow" style={{ padding: '1.5rem', position: 'relative' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{funnel.name}</h4>
+                      <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginTop: '0.25rem', fontVariantNumeric: 'tabular-nums' }}>
+                        {funnel.steps.length} steps defined
+                      </div>
                     </div>
+                    <button className="btn-ghost" onClick={() => handleDelete(funnel.id)} style={{ padding: '0.375rem', color: 'var(--color-text-muted)' }}>
+                      <Trash2 size={16} />
+                    </button>
                   </div>
-                  <button className="btn-ghost" onClick={() => handleDelete(funnel.id)} style={{ padding: '0.375rem', color: 'var(--color-text-muted)' }}>
-                    <Trash2 size={16} />
-                  </button>
+                  
+                  {funnel.analytics && funnel.analytics.length > 0 && chartData.length > 0 ? (
+                    <FunnelChart data={chartData} title="Step Conversions" />
+                  ) : (
+                    <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>No data available for this range.</div>
+                  )}
                 </div>
-                
-                {funnel.analytics && funnel.analytics.length > 0 && chartData.length > 0 ? (
-                  <FunnelChart data={chartData} title="Step Conversions" />
-                ) : (
-                  <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>No data available for this range.</div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
+      {/* ── Modal Overlay ──────────────────────────────── */}
       {showAdd && (
         <div ref={overlayRef} onClick={closeModal} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div ref={modalRef} onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: '520px', background: 'var(--color-bg-raised)', border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)', overflow: 'hidden' }}>

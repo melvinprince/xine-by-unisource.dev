@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { gsap } from 'gsap';
 import { ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import SectionHeader from '@/components/SectionHeader';
 
 interface Column<T> {
   key: keyof T;
@@ -18,6 +19,9 @@ interface DataTableProps<T> {
   data: T[];
   title?: string;
   delay?: number;
+  onRowClick?: (row: T) => void;
+  selectedValues?: string[];
+  selectableKey?: keyof T;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,6 +30,9 @@ export default function DataTable<T extends Record<string, any>>({
   data,
   title,
   delay = 0.5,
+  onRowClick,
+  selectedValues,
+  selectableKey,
 }: DataTableProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef<HTMLTableSectionElement>(null);
@@ -89,18 +96,7 @@ export default function DataTable<T extends Record<string, any>>({
       className="glass-card"
       style={{ padding: '1.5rem', opacity: 0, overflow: 'hidden' }}
     >
-      {title && (
-        <h3
-          style={{
-            fontSize: '0.9375rem',
-            fontWeight: 600,
-            color: 'var(--color-text-primary)',
-            marginBottom: '1rem',
-          }}
-        >
-          {title}
-        </h3>
-      )}
+      {title && <SectionHeader title={title} />}
 
       <div style={{ overflowX: 'auto' }}>
         <table
@@ -159,38 +155,39 @@ export default function DataTable<T extends Record<string, any>>({
             </tr>
           </thead>
           <tbody ref={rowsRef}>
-            {sortedData.map((row, i) => (
-              <tr
-                key={i}
-                style={{
-                  transition: 'background 0.15s ease',
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background =
-                    'var(--color-bg-overlay)')
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = 'transparent')
-                }
-              >
-                {columns.map((col) => (
-                  <td
-                    key={String(col.key)}
-                    style={{
-                      padding: '0.625rem 0.75rem',
-                      textAlign: col.align || 'left',
-                      color: 'var(--color-text-secondary)',
-                      borderBottom: '1px solid var(--color-border-subtle)',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {col.render
-                      ? col.render(row[col.key], row)
-                      : String(row[col.key] ?? '')}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {sortedData.map((row, i) => {
+              const isSelected = selectedValues && selectableKey && selectedValues.includes(String(row[selectableKey]));
+              return (
+                <tr
+                  key={i}
+                  onClick={() => onRowClick && onRowClick(row)}
+                  className={`${onRowClick ? 'clickable-row' : ''} ${isSelected ? 'selected-row' : ''}`}
+                  style={{
+                    transition: 'background 0.15s ease',
+                  }}
+                >
+                  {columns.map((col, colIdx) => (
+                    <td
+                      key={String(col.key)}
+                      style={{
+                        padding: '0.625rem 0.75rem',
+                        textAlign: col.align || 'left',
+                        color: 'var(--color-text-secondary)',
+                        borderBottom: '1px solid var(--color-border-subtle)',
+                        whiteSpace: 'nowrap',
+                        borderLeft: colIdx === 0 && isSelected ? '3px solid var(--color-accent)' : undefined,
+                        paddingLeft: colIdx === 0 && isSelected ? 'calc(0.75rem - 3px)' : '0.75rem',
+                        fontVariantNumeric: col.align === 'right' ? 'tabular-nums' : undefined,
+                      }}
+                    >
+                      {col.render
+                        ? col.render(row[col.key], row)
+                        : String(row[col.key] ?? '')}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
 /* ============================================================
-   XINE BY UNISOURCE — DESIGN SYSTEM TOKENS
+   XINE BY UNISOURCE — DESIGN SYSTEM TOKENS v2
    Premium dark-mode palette with vibrant accents
+   Redesigned for clarity, hierarchy, and trust
    ============================================================ */
 
 @theme {
@@ -62,7 +63,7 @@
   --duration-base: 250ms;
   --duration-slow: 400ms;
 
-  /* ── Sidebar ───────────────────────────────────────────── */
+  /* ── Layout ───────────────────────────────────────────── */
   --sidebar-width: 260px;
   --sidebar-collapsed: 72px;
   --header-height: 64px;
@@ -80,37 +81,40 @@
 
 :root {
   /* LIGHT MODE (Day) */
-  --theme-bg-deepest: hsl(210 16% 96%);
+  --theme-bg-deepest: hsl(220 14% 96%);
   --theme-bg-base: hsl(0 0% 100%);
-  --theme-bg-raised: hsl(210 16% 98%);
+  --theme-bg-raised: hsl(220 14% 98%);
   --theme-bg-surface: hsl(0 0% 100%);
-  --theme-bg-overlay: hsl(210 16% 94%);
+  --theme-bg-overlay: hsl(220 14% 94%);
 
-  --theme-border-subtle: hsl(210 14% 89%);
-  --theme-border-default: hsl(210 14% 83%);
-  --theme-border-strong: hsl(210 14% 70%);
+  --theme-border-subtle: hsl(220 13% 91%);
+  --theme-border-default: hsl(220 13% 83%);
+  --theme-border-strong: hsl(220 13% 70%);
 
   --theme-text-primary: hsl(225 15% 15%);
-  --theme-text-secondary: hsl(225 12% 25%);
-  --theme-text-muted: hsl(225 10% 40%);
+  --theme-text-secondary: hsl(225 12% 35%);
+  --theme-text-muted: hsl(225 10% 50%);
   
   --theme-glass-bg: linear-gradient(
     135deg,
-    hsl(0 0% 100% / 0.7),
-    hsl(210 16% 98% / 0.5)
+    hsl(0 0% 100% / 0.8),
+    hsl(220 14% 98% / 0.6)
   );
 
-  --theme-shadow-sm: 0 1px 2px hsl(225 15% 20% / 0.03);
-  --theme-shadow-md: 0 2px 8px hsl(225 15% 20% / 0.04);
-  --theme-shadow-lg: 0 6px 16px hsl(225 15% 20% / 0.05);
-  --theme-shadow-glow: 0 0 16px hsl(217 91% 60% / 0.12);
+  --theme-shadow-sm: 0 1px 2px hsl(225 15% 20% / 0.04);
+  --theme-shadow-md: 0 2px 8px hsl(225 15% 20% / 0.06);
+  --theme-shadow-lg: 0 8px 24px hsl(225 15% 20% / 0.08);
+  --theme-shadow-glow: 0 0 16px hsl(217 91% 60% / 0.15);
+
+  --skeleton-base: hsl(220 13% 91%);
+  --skeleton-shine: hsl(220 13% 96%);
 
   color-scheme: light;
 }
 
 html[data-theme="dark"] {
-  /* DARK MODE (Night) - Exact Original Values */
-  --theme-bg-deepest: hsl(225 15% 6%);
+  /* DARK MODE (Night) */
+  --theme-bg-deepest: hsl(225 16% 6%);
   --theme-bg-base: hsl(225 15% 9%);
   --theme-bg-raised: hsl(225 14% 13%);
   --theme-bg-surface: hsl(225 13% 16%);
@@ -120,20 +124,23 @@ html[data-theme="dark"] {
   --theme-border-default: hsl(225 10% 24%);
   --theme-border-strong: hsl(225 10% 32%);
 
-  --theme-text-primary: hsl(0 0% 100%);
-  --theme-text-secondary: hsl(225 15% 85%);
-  --theme-text-muted: hsl(225 15% 70%);
+  --theme-text-primary: hsl(0 0% 98%);
+  --theme-text-secondary: hsl(225 15% 75%);
+  --theme-text-muted: hsl(225 12% 55%);
   
   --theme-glass-bg: linear-gradient(
     135deg,
-    hsl(225 14% 13% / 0.6),
-    hsl(225 14% 16% / 0.4)
+    hsl(225 14% 13% / 0.7),
+    hsl(225 14% 16% / 0.5)
   );
 
   --theme-shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.3);
   --theme-shadow-md: 0 4px 12px hsl(0 0% 0% / 0.35);
   --theme-shadow-lg: 0 8px 30px hsl(0 0% 0% / 0.4);
   --theme-shadow-glow: 0 0 20px hsl(217 91% 60% / 0.2);
+
+  --skeleton-base: hsl(225 14% 14%);
+  --skeleton-shine: hsl(225 14% 18%);
 
   color-scheme: dark;
 }
@@ -175,10 +182,10 @@ body {
 }
 
 /* ============================================================
-   UTILITY CLASSES
+   COMPONENT CLASSES
    ============================================================ */
 
-/* Glassmorphism card */
+/* ── Glassmorphism Card ─────────────────────────────────── */
 .glass-card {
   background: var(--theme-glass-bg);
   backdrop-filter: blur(12px);
@@ -199,7 +206,7 @@ body {
   transform: translateY(-2px);
 }
 
-/* Glow border for code/snippet blocks */
+/* ── Glow Border ─────────────────────────────────────────── */
 .glow-border {
   position: relative;
   border: 1px solid var(--color-border-subtle);
@@ -231,12 +238,11 @@ body {
   opacity: 1;
 }
 
-/* Neon text */
+/* ── Text Effects ────────────────────────────────────────── */
 .text-glow {
   text-shadow: 0 0 20px var(--color-accent-glow);
 }
 
-/* Gradient text */
 .gradient-text {
   background: linear-gradient(135deg, var(--color-accent), var(--color-chart-2));
   -webkit-background-clip: text;
@@ -244,7 +250,7 @@ body {
   background-clip: text;
 }
 
-/* Input base styles */
+/* ── Input Base ──────────────────────────────────────────── */
 .input-base {
   width: 100%;
   padding: 0.75rem 1rem;
@@ -266,7 +272,7 @@ body {
   box-shadow: 0 0 0 3px var(--color-accent-subtle);
 }
 
-/* Button base */
+/* ── Buttons ─────────────────────────────────────────────── */
 .btn-primary {
   display: inline-flex;
   align-items: center;
@@ -341,10 +347,167 @@ body {
   background: var(--color-danger);
   color: white;
 }
+
+/* ============================================================
+   ANIMATIONS
+   ============================================================ */
+
 @keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-8px) scaleY(0.96); }
+  to { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+
+/* ── Skeleton Loader ─────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--skeleton-base) 25%,
+    var(--skeleton-shine) 50%,
+    var(--skeleton-base) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+  border-radius: var(--radius-md);
+}
+
+.skeleton-text {
+  height: 0.875rem;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-heading {
+  height: 1.5rem;
+  width: 40%;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-stat {
+  height: 2.5rem;
+  width: 60%;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-chart {
+  height: 200px;
+  border-radius: var(--radius-md);
+}
+
+/* ============================================================
+   FILTER STATE INDICATORS
+   ============================================================ */
+
+/* When filters are active, show a persistent accent stripe */
+.filtered-view {
+  position: relative;
+}
+.filtered-view::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-chart-2));
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  z-index: 1;
+  animation: slide-down 0.3s ease-out;
+}
+
+/* ============================================================
+   TABLE STYLES
+   ============================================================ */
+
+.clickable-row {
+  cursor: pointer;
+}
+.clickable-row:hover {
+  background: var(--color-bg-overlay) !important;
+}
+.selected-row {
+  background: var(--color-accent-subtle) !important;
+}
+.selected-row:hover {
+  background: var(--color-accent-subtle) !important;
+  opacity: 0.95;
+}
+
+/* ============================================================
+   SIDEBAR NAV GROUPS
+   ============================================================ */
+
+.nav-group-label {
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+  padding: 0.5rem 0.75rem;
+  margin-top: 1rem;
+  margin-bottom: 0.25rem;
+}
+.nav-group-label:first-of-type {
+  margin-top: 0;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  position: relative;
+}
+.nav-item:hover {
+  background: var(--color-bg-overlay);
+  color: var(--color-text-primary);
+}
+.nav-item.active {
+  color: var(--color-accent);
+  background: var(--color-accent-subtle);
+  font-weight: 600;
+}
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  background: var(--color-accent);
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+}
+
+/* ============================================================
+   THEME LOGO TOGGLE
+   ============================================================ */
 
 .theme-light-logo {
   display: block;
@@ -359,3 +522,31 @@ html[data-theme='dark'] .theme-dark-logo {
   display: block !important;
 }
 
+/* ============================================================
+   RESPONSIVE UTILITIES
+   ============================================================ */
+
+@media (max-width: 768px) {
+  .sidebar-mobile-toggle {
+    display: flex !important;
+  }
+  .sidebar-container {
+    transform: translateX(-280px);
+  }
+  .sidebar-collapse-btn {
+    display: none !important;
+  }
+  .sidebar-mobile-close {
+    display: flex !important;
+  }
+  .dashboard-main {
+    margin-left: 0 !important;
+  }
+  .dashboard-header {
+    padding-left: 4rem !important;
+    padding-right: 1rem !important;
+  }
+  .dashboard-main main {
+    padding: 1rem !important;
+  }
+}

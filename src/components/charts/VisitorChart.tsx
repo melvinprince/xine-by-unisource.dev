@@ -2,6 +2,7 @@
 
 import { useRef, useEffect } from 'react';
 import { gsap } from 'gsap';
+import SectionHeader from '@/components/SectionHeader';
 import {
   AreaChart,
   Area,
@@ -42,37 +43,62 @@ function CustomTooltip({
     <div
       style={{
         background: 'var(--color-bg-raised)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
         border: '1px solid var(--color-border-subtle)',
         borderRadius: 'var(--radius-md)',
         padding: '0.75rem 1rem',
         boxShadow: 'var(--shadow-lg)',
+        minWidth: '140px',
       }}
     >
       <p
         style={{
-          fontSize: '0.75rem',
+          fontSize: '0.6875rem',
           color: 'var(--color-text-muted)',
-          marginBottom: '0.375rem',
+          marginBottom: '0.5rem',
+          fontWeight: 500,
+          textTransform: 'uppercase',
+          letterSpacing: '0.03em',
         }}
       >
         {label}
       </p>
       {payload.map((entry, i) => (
-        <p
+        <div
           key={i}
           style={{
-            fontSize: '0.8125rem',
-            fontWeight: 600,
-            color:
-              entry.dataKey === 'visitors' || entry.dataKey === primaryDataKey
-                ? 'hsl(217 91% 60%)'
-                : 'hsl(271 81% 65%)',
-            margin: '0.125rem 0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem',
+            padding: '0.125rem 0',
           }}
         >
-          {entry.dataKey === 'visitors' || entry.dataKey === primaryDataKey ? primaryLabel : 'Pageviews'}:{' '}
-          {entry.value.toLocaleString()}
-        </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+            <div style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: entry.dataKey === 'visitors' || entry.dataKey === primaryDataKey
+                ? 'hsl(217 91% 60%)'
+                : 'hsl(271 81% 65%)',
+            }} />
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+              {entry.dataKey === 'visitors' || entry.dataKey === primaryDataKey ? primaryLabel : 'Pageviews'}
+            </span>
+          </div>
+          <span
+            style={{
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              color: 'var(--color-text-primary)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {entry.value.toLocaleString()}
+          </span>
+        </div>
       ))}
     </div>
   );
@@ -103,19 +129,7 @@ export default function VisitorChart({
       className="glass-card"
       style={{ padding: '1.5rem', opacity: 0 }}
     >
-      <h3
-        style={{
-          fontSize: '0.9375rem',
-          fontWeight: 600,
-          color: 'var(--color-text-primary)',
-          marginBottom: '1rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-        }}
-      >
-        {title}
-      </h3>
+      <SectionHeader title={typeof title === 'string' ? title : 'Visitor Trend'} />
       <div style={{ width: '100%', height: 300 }}>
         <ResponsiveContainer>
           <AreaChart

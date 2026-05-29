@@ -82,6 +82,7 @@ export interface TopPage {
   views: number;
   uniqueVisitors: number;
   avgDuration: number;
+  siteIds?: string[];
 }
 
 /** Top referrer/source entry */
@@ -89,6 +90,7 @@ export interface TopSource {
   referrer: string;
   visitors: number;
   percentage: number;
+  siteIds?: string[];
 }
 
 /** Device type breakdown */

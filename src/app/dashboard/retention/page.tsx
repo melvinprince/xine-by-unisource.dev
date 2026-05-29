@@ -1,19 +1,24 @@
 "use client";
 
+import { Repeat } from "lucide-react";
 import { useDashboardContext } from "@/components/DashboardContext";
 import { useDashboardFetch } from "@/hooks/use-dashboard-data";
 import SiteSelector from "@/components/SiteSelector";
 import HelpTooltip from "@/components/HelpTooltip";
+import PageHeader from "@/components/PageHeader";
+import SectionHeader from "@/components/SectionHeader";
+import { LoadingState, EmptyState } from "@/components/DataStates";
 import { format } from "date-fns";
 import type { CohortRow } from "@/lib/types";
 
 export default function RetentionPage() {
-  const { selectedSite: currentSite, dateRange, sites, setSelectedSite } = useDashboardContext();
+  const { selectedSite: currentSite, dateRange, sites, setSelectedSite, activeFilters } = useDashboardContext();
 
   const { data, loading } = useDashboardFetch<{ cohorts: CohortRow[] }>(
     "/api/dashboard/retention",
     currentSite,
-    dateRange ? { from: dateRange.from, to: dateRange.to } : undefined
+    dateRange ? { from: dateRange.from, to: dateRange.to } : undefined,
+    activeFilters
   );
 
   const cohorts = data?.cohorts || [];
@@ -37,37 +42,54 @@ export default function RetentionPage() {
   const sortedWeeks = Object.keys(matrix).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 style={{ fontSize: '1.875rem', fontWeight: 700, color: 'var(--color-text-primary)', letterSpacing: '-0.025em' }}>
-            Retention Cohorts <HelpTooltip title="Retention Cohorts" content="Tracks how many visitors return to your site week over week. Each row represents a cohort of users who first visited in that week. Greener cells mean higher retention." />
-          </h1>
-          <p style={{ color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>
-            See how often users return to your site week over week.
-          </p>
-        </div>
-        <SiteSelector sites={sites} selected={currentSite} onChange={setSelectedSite} />
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* ── Page Header ────────────────────────────────────── */}
+      <PageHeader
+        title="Retention"
+        description="Visitor retention and cohort analysis"
+        icon={<Repeat size={20} />}
+        actions={
+          <SiteSelector sites={sites} selected={currentSite} onChange={setSelectedSite} />
+        }
+      />
 
-      <div className="glass-card p-6 min-h-[500px] overflow-x-auto">
+      {/* ── Cohort Retention Table ──────────────────────────── */}
+      <div className="glass-card" style={{ padding: '1.5rem', minHeight: '500px', overflowX: 'auto' }}>
+        <SectionHeader
+          title="Retention Cohorts"
+          description="Track how many visitors return to your site week over week"
+          actions={
+            <HelpTooltip
+              title="Retention Cohorts"
+              content="Tracks how many visitors return to your site week over week. Each row represents a cohort of users who first visited in that week. Greener cells mean higher retention."
+            />
+          }
+        />
+
         {loading ? (
-          <div className="flex items-center justify-center h-[300px]">
-            <div className="w-8 h-8 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin"/>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '300px' }}>
+            <div style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              border: '2px solid var(--color-accent)',
+              borderTopColor: 'transparent',
+              animation: 'spin 0.8s linear infinite',
+            }} />
           </div>
         ) : sortedWeeks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-[300px]" style={{ color: 'var(--color-text-muted)' }}>
-            <p className="text-lg">No retention data available yet.</p>
-            <p className="text-sm mt-2">Check back after users have returned for multiple sessions.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '300px', color: 'var(--color-text-muted)' }}>
+            <p style={{ fontSize: '1.125rem', margin: 0 }}>No retention data available yet.</p>
+            <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>Check back after users have returned for multiple sessions.</p>
           </div>
         ) : (
-          <table className="w-full text-sm text-left">
+          <table style={{ width: '100%', fontSize: '0.875rem', textAlign: 'left', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <th className="py-3 px-4 font-medium" style={{ color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border-subtle)' }}>Cohort Week</th>
-                <th className="py-3 px-4 font-medium" style={{ color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border-subtle)' }}>Users</th>
+                <th style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border-subtle)' }}>Cohort Week</th>
+                <th style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border-subtle)' }}>Users</th>
                 {Array.from({ length: maxWeek + 1 }).map((_, i) => (
-                  <th key={i} className="py-3 px-4 font-medium text-center" style={{ color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                  <th key={i} style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-secondary)', borderBottom: '1px solid var(--color-border-subtle)', textAlign: 'center' }}>
                     Week {i}
                   </th>
                 ))}
@@ -78,11 +100,11 @@ export default function RetentionPage() {
                 const row = matrix[week];
                 const total = row.totalUsers;
                 return (
-                  <tr key={week} className="hover-bg-surface" style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                    <td className="py-3 px-4 font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                  <tr key={week} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                    <td style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>
                       {format(new Date(week), "MMM d, yyyy")}
                     </td>
-                    <td className="py-3 px-4" style={{ color: 'var(--color-text-secondary)' }}>
+                    <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
                       {total.toLocaleString()}
                     </td>
                     {Array.from({ length: maxWeek + 1 }).map((_, i) => {
@@ -98,12 +120,20 @@ export default function RetentionPage() {
                       const textColor = pct > 0 && bgOpacity > 0.4 ? '#fff' : 'var(--color-text-muted)';
                       
                       return (
-                        <td key={i} className="py-2 px-1 text-center">
+                        <td key={i} style={{ padding: '0.5rem 0.25rem', textAlign: 'center' }}>
                           <div 
-                            className="py-2 px-1 rounded-md flex flex-col items-center justify-center min-w-[60px]"
-                            style={{ backgroundColor: bgColor }}
+                            style={{
+                              padding: '0.5rem 0.25rem',
+                              borderRadius: 'var(--radius-md)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              minWidth: '60px',
+                              backgroundColor: bgColor,
+                            }}
                           >
-                            <span style={{ color: textColor, fontWeight: pct > 0 ? 600 : 400 }}>
+                            <span style={{ color: textColor, fontWeight: pct > 0 ? 600 : 400, fontVariantNumeric: 'tabular-nums' }}>
                               {pct > 0 ? pct.toFixed(1) + '%' : '-'}
                             </span>
                           </div>

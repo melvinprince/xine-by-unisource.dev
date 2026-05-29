@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getSeoOverview } from "@/lib/queries-advanced";
-import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse } from "@/lib/api-helpers";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, parseFilters } from "@/lib/api-helpers";
+import { filterStore } from "@/lib/filter-store";
 
 export async function GET(request: NextRequest) {
   try {
@@ -49,7 +50,8 @@ export async function GET(request: NextRequest) {
       dateRange = { from, to };
     }
 
-    const data = await getSeoOverview(siteId, dateRange);
+    const filters = parseFilters(searchParams);
+    const data = await filterStore.run(filters, () => getSeoOverview(siteId, dateRange!));
     return NextResponse.json(data);
   } catch (error) {
     console.error("[api/dashboard/seo] GET Error:", error);

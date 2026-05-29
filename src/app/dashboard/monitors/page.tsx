@@ -1,11 +1,14 @@
-"use client";
-import { useState, useEffect, useCallback } from "react";
-import { useDashboardContext } from "@/components/DashboardContext";
-import SiteSelector from "@/components/SiteSelector";
-import HelpTooltip from "@/components/HelpTooltip";
-import FeatureGuide from "@/components/FeatureGuide";
-import { Bell, Activity, Send } from "lucide-react";
-import { LoadingState, ErrorState } from "@/components/DataStates";
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useDashboardContext } from '@/components/DashboardContext';
+import SiteSelector from '@/components/SiteSelector';
+import HelpTooltip from '@/components/HelpTooltip';
+import FeatureGuide from '@/components/FeatureGuide';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
+import { Bell, Activity, Send } from 'lucide-react';
+import { LoadingState, ErrorState } from '@/components/DataStates';
 
 interface UptimeCheck {
   id: string;
@@ -73,24 +76,33 @@ export default function MonitorsPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0 }}>
-            Monitors & Alerts <HelpTooltip title="Monitors & Alerts" content="Monitor your site's uptime, set up traffic alerts, and configure automated email reports." />
-          </h2>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0.25rem 0 0' }}>Manage uptime checks, triggered alerts, and email reports.</p>
-        </div>
-        <SiteSelector sites={sites} selected={currentSite} onChange={setSelectedSite} />
-      </div>
+      {/* Header */}
+      <PageHeader
+        title="Monitors"
+        description="Uptime monitoring, alerts, and scheduled reports"
+        icon={<Bell size={20} />}
+        actions={
+          <SiteSelector sites={sites} selected={currentSite} onChange={setSelectedSite} />
+        }
+      />
 
       {loading ? (
         <LoadingState message="Loading monitors & alerts..." />
       ) : error ? (
         <ErrorState message={error} onRetry={fetchData} />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: '1.5rem' }}>
+          {/* Uptime Checks */}
           <div className="glass-card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--color-accent)' }}><Activity className="w-5 h-5"/> Uptime Checks <HelpTooltip title="Uptime Checks" content="Monitors your site by pinging it at regular intervals. Records response time and status (up/down). Requires the uptime cron job to be running on your server." /></h3>
+            <SectionHeader
+              title="Uptime Checks"
+              description="Automatic site pings"
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+              <Activity size={16} style={{ color: 'var(--color-accent)' }} />
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-accent)' }}>Live Monitoring</span>
+              <HelpTooltip title="Uptime Checks" content="Monitors your site by pinging it at regular intervals. Records response time and status (up/down). Requires the uptime cron job to be running on your server." />
+            </div>
             {uptime.length === 0 ? (
               <div>
                 <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem', marginBottom: '0.75rem' }}>No checks recorded yet.</p>
@@ -119,17 +131,26 @@ export default function MonitorsPage() {
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-bg-overlay)', padding: '0.75rem', borderRadius: 'var(--radius-md)', fontSize: '0.875rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: u.status === 'up' ? 'var(--color-accent)' : 'var(--color-error, #ef4444)' }}/>
-                      <span style={{ color: 'var(--color-text-primary)' }}>{new Date(u.checked_at).toLocaleTimeString()}</span>
+                      <span style={{ color: 'var(--color-text-primary)', fontVariantNumeric: 'tabular-nums' }}>{new Date(u.checked_at).toLocaleTimeString()}</span>
                     </div>
-                    <span style={{ color: 'var(--color-text-secondary)', fontFamily: 'monospace' }}>{u.response_time}ms</span>
+                    <span style={{ color: 'var(--color-text-secondary)', fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums' }}>{u.response_time}ms</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
+          {/* Triggers & Alerts */}
           <div className="glass-card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--color-error, #ef4444)' }}><Bell className="w-5 h-5"/> Triggers & Alerts <HelpTooltip title="Triggers & Alerts" content="Set threshold-based alerts that notify you when metrics exceed or drop below configured values." /></h3>
+            <SectionHeader
+              title="Triggers & Alerts"
+              description="Threshold-based notifications"
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+              <Bell size={16} style={{ color: 'var(--color-error, #ef4444)' }} />
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-error, #ef4444)' }}>Alert Rules</span>
+              <HelpTooltip title="Triggers & Alerts" content="Set threshold-based alerts that notify you when metrics exceed or drop below configured values." />
+            </div>
             {alerts.length === 0 ? (
               <div>
                 <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem', marginBottom: '0.75rem' }}>No alerts configured yet.</p>
@@ -160,15 +181,24 @@ export default function MonitorsPage() {
                       <div style={{ color: 'var(--color-text-primary)', textTransform: 'capitalize' }}>{a.type.replace('_', ' ')}</div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>{a.channel} &rarr; {a.channel_target}</div>
                     </div>
-                    <span style={{ color: 'var(--color-text-secondary)', fontFamily: 'monospace' }}>{typeof a.threshold === 'object' ? a.threshold.value : a.threshold}</span>
+                    <span style={{ color: 'var(--color-text-secondary)', fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums' }}>{typeof a.threshold === 'object' ? a.threshold.value : a.threshold}</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
+          {/* Email Reports */}
           <div className="glass-card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--color-chart-1)' }}><Send className="w-5 h-5"/> Email Reports <HelpTooltip title="Email Reports" content="Automated periodic emails summarizing your site's key metrics. Configure weekly or monthly delivery to any email address." /></h3>
+            <SectionHeader
+              title="Email Reports"
+              description="Automated periodic summaries"
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+              <Send size={16} style={{ color: 'var(--color-chart-1)' }} />
+              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-chart-1)' }}>Scheduled Delivery</span>
+              <HelpTooltip title="Email Reports" content="Automated periodic emails summarizing your site's key metrics. Configure weekly or monthly delivery to any email address." />
+            </div>
             {reports.length === 0 ? (
               <div>
                 <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8125rem', marginBottom: '0.75rem' }}>No reports configured yet.</p>
@@ -197,7 +227,7 @@ export default function MonitorsPage() {
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-bg-overlay)', padding: '0.75rem', borderRadius: 'var(--radius-md)', fontSize: '0.875rem', border: '1px solid var(--color-border-subtle)' }}>
                     <div>
                       <div style={{ color: 'var(--color-text-primary)', textTransform: 'capitalize' }}>{r.schedule} Report</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem' }}>{r.recipients.length} recipients</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.125rem', fontVariantNumeric: 'tabular-nums' }}>{r.recipients.length} recipients</div>
                     </div>
                   </div>
                 ))}

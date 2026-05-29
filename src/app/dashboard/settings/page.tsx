@@ -18,6 +18,8 @@ import {
 import IntegrationSnippet from '@/components/IntegrationSnippet';
 import { LoadingState } from '@/components/DataStates';
 import { useDashboardContext } from '@/components/DashboardContext';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
 import type { Site } from '@/lib/types';
 
 gsap.registerPlugin(useGSAP);
@@ -155,44 +157,19 @@ export default function SettingsPage() {
   if (sitesLoading) return <LoadingState message="Loading sites..." />;
 
   return (
-    <div ref={pageRef} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Header */}
-      <div
-        className="settings-section"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '1rem',
-        }}
-      >
-        <div>
-          <h2
-            style={{
-              fontSize: '1.25rem',
-              fontWeight: 700,
-              color: 'var(--color-text-primary)',
-              margin: 0,
-            }}
-          >
-            Site Management
-          </h2>
-          <p
-            style={{
-              fontSize: '0.8125rem',
-              color: 'var(--color-text-secondary)',
-              margin: '0.25rem 0 0',
-            }}
-          >
-            Add, remove, and manage tracked websites
-          </p>
-        </div>
-        <button className="btn-primary" onClick={() => openModal('add')}>
-          <Plus size={18} />
-          Add Site
-        </button>
-      </div>
+    <div ref={pageRef} className="flex flex-col gap-6 font-[family-name:var(--font-poppins)]">
+      {/* Page Header */}
+      <PageHeader
+        title="Settings"
+        description="Manage your tracked sites, integrations, and features"
+        icon={<Settings size={20} />}
+        actions={
+          <button className="btn-primary" onClick={() => openModal('add')}>
+            <Plus size={18} />
+            Add Site
+          </button>
+        }
+      />
 
       {/* Sites List */}
       <div className="settings-section glass-card" style={{ overflow: 'hidden' }}>
@@ -202,16 +179,7 @@ export default function SettingsPage() {
             borderBottom: '1px solid var(--color-border-subtle)',
           }}
         >
-          <h3
-            style={{
-              fontSize: '0.9375rem',
-              fontWeight: 600,
-              color: 'var(--color-text-primary)',
-              margin: 0,
-            }}
-          >
-            Tracked Sites ({sites.length})
-          </h3>
+          <SectionHeader title={`Tracked Sites (${sites.length})`} />
         </div>
 
         {sites.length === 0 ? (
@@ -671,7 +639,7 @@ export default function SettingsPage() {
                                   Fetch your analytics data programmatically. Send a GET request with your server API key as a Bearer token:
                                 </p>
                                 <pre style={{ padding: '0.75rem', background: 'var(--color-bg-base)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border-subtle)', fontSize: '0.7rem', fontFamily: "'Fira Code', monospace", color: 'var(--color-chart-3)', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, lineHeight: 1.6 }}>
-{`curl -H "Authorization: Bearer ${showDetail.server_api_key}" \
+{`curl -H "Authorization: Bearer ${showDetail.server_api_key}" \\
   "${typeof window !== 'undefined' ? window.location.origin : 'https://your-analytics-domain.com'}/api/v1/stats?siteId=${showDetail.id}&from=2025-01-01&to=2025-12-31"`}
                                 </pre>
                                 <p style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', margin: '0.5rem 0 0', lineHeight: 1.4 }}>
@@ -795,10 +763,10 @@ function SiteFeaturesForm({ siteId }: { siteId: string }) {
         <div>
           <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Estimated script size</span>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', marginTop: '0.25rem' }}>
-            <span style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-accent)' }}>{totalGzipKB}KB</span>
+            <span style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-accent)', fontVariantNumeric: 'tabular-nums' }}>{totalGzipKB}KB</span>
             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>gzipped</span>
             <span style={{ fontSize: '0.75rem', color: 'var(--color-border-subtle)' }}>|</span>
-            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>{totalRawKB.toFixed(1)}KB</span>
+            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{totalRawKB.toFixed(1)}KB</span>
             <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>raw</span>
           </div>
         </div>
@@ -838,7 +806,7 @@ function SiteFeaturesForm({ siteId }: { siteId: string }) {
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <span style={{ fontSize: '0.65rem', padding: '0.125rem 0.375rem', background: 'var(--color-bg-base)', borderRadius: '1rem', color: 'var(--color-text-muted)' }}>
+                  <span style={{ fontSize: '0.65rem', padding: '0.125rem 0.375rem', background: 'var(--color-bg-base)', borderRadius: '1rem', color: 'var(--color-text-muted)', fontVariantNumeric: 'tabular-nums' }}>
                     {item.size}
                   </span>
                   
@@ -950,27 +918,13 @@ function BannedLoginsManager() {
         style={{
           padding: '1rem 1.5rem',
           borderBottom: '1px solid var(--color-border-subtle)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <ShieldAlert size={18} style={{ color: 'var(--color-danger)' }} />
-          <h3
-            style={{
-              fontSize: '0.9375rem',
-              fontWeight: 600,
-              color: 'var(--color-text-primary)',
-              margin: 0,
-            }}
-          >
-            Banned IPs & Devices ({bans.length})
-          </h3>
-        </div>
-        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-          Login lockdown · 3 failed attempts = permanent ban
-        </span>
+        <SectionHeader
+          title={`Banned IPs & Devices (${bans.length})`}
+          description="Login lockdown · 3 failed attempts = permanent ban"
+          actions={<ShieldAlert size={18} style={{ color: 'var(--color-danger)' }} />}
+        />
       </div>
 
       {loading ? (

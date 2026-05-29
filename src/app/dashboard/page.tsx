@@ -7,15 +7,18 @@ import VisitorChart from '@/components/charts/VisitorChart';
 import DonutChart from '@/components/charts/DonutChart';
 import BarChart from '@/components/charts/BarChart';
 import DataTable from '@/components/DataTable';
+import PageHeader from '@/components/PageHeader';
+import SectionHeader from '@/components/SectionHeader';
 import HelpTooltip from '@/components/HelpTooltip';
+import SiteFavicons from '@/components/SiteFavicons';
 import { LoadingState, EmptyState, ErrorState } from '@/components/DataStates';
 import { useDashboardContext } from '@/components/DashboardContext';
 import { useDashboardData } from '@/hooks/use-dashboard-data';
 import { formatDuration } from '@/lib/utils';
 
 export default function DashboardPage() {
-  const { selectedSite, dateRange } = useDashboardContext();
-  const { data, loading, error, refetch } = useDashboardData(selectedSite, dateRange);
+  const { selectedSite, dateRange, activeFilters, toggleFilter, sites } = useDashboardContext();
+  const { data, loading, error, refetch } = useDashboardData(selectedSite, dateRange, activeFilters);
 
   const [hiddenWidgets, setHiddenWidgets] = useState<string[]>([]);
   const [showCustomize, setShowCustomize] = useState(false);
@@ -50,7 +53,7 @@ export default function DashboardPage() {
   if (!hasData) {
     return (
       <EmptyState
-        icon={<BarChart3 size={48} />}
+        icon={<BarChart3 size={28} />}
         title="No analytics data yet"
         description="Once your tracking script sends pageviews, your dashboard will populate here."
       />
@@ -58,31 +61,73 @@ export default function DashboardPage() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', position: 'relative' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       
-      {/* Customize Toggle */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-0.5rem' }}>
-        <button 
-          onClick={() => setShowCustomize(!showCustomize)}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--color-bg-raised)', border: '1px solid var(--color-border-subtle)', padding: '0.5rem 0.75rem', borderRadius: 'var(--radius-md)', fontSize: '0.8125rem', color: 'var(--color-text-secondary)', transition: 'all 0.2s', cursor: 'pointer' }}
-        >
-          <Settings size={14} /> Customize
-        </button>
-      </div>
+      {/* ── Page Header ────────────────────────────────────── */}
+      <PageHeader
+        title="Overview"
+        description="Your site performance at a glance"
+        icon={<BarChart3 size={20} />}
+        actions={
+          <button 
+            onClick={() => setShowCustomize(!showCustomize)}
+            className="btn-ghost"
+            style={{ gap: '0.375rem', fontSize: '0.75rem' }}
+          >
+            <Settings size={14} />
+            Customize
+          </button>
+        }
+      />
       
+      {/* ── Customize Panel ────────────────────────────────── */}
       {showCustomize && (
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', background: 'var(--color-bg-raised)', padding: '1rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-subtle)', marginBottom: '1rem' }}>
-           <div style={{ width: '100%', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Visibility Toggles</div>
-           {['stats', 'trend', 'pages', 'sources', 'devices', 'browsers', 'countries'].map(id => (
-             <label key={id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8125rem', color: 'var(--color-text-secondary)', cursor: 'pointer' }}>
-               <input type="checkbox" checked={!hiddenWidgets.includes(id)} onChange={() => toggleWidget(id)} />
-               {id.charAt(0).toUpperCase() + id.slice(1)}
-             </label>
-           ))}
+        <div 
+          className="glass-card"
+          style={{ 
+            display: 'flex', 
+            gap: '1rem', 
+            flexWrap: 'wrap', 
+            padding: '1rem 1.25rem',
+            animation: 'slide-down 0.2s ease-out',
+          }}
+        >
+          <span style={{ 
+            width: '100%', 
+            fontSize: '0.75rem', 
+            fontWeight: 600, 
+            color: 'var(--color-text-secondary)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+          }}>
+            Toggle Sections
+          </span>
+          {['stats', 'trend', 'pages', 'sources', 'devices', 'browsers', 'countries'].map(id => (
+            <label 
+              key={id} 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.5rem', 
+                fontSize: '0.8125rem', 
+                color: hiddenWidgets.includes(id) ? 'var(--color-text-muted)' : 'var(--color-text-primary)',
+                cursor: 'pointer',
+                transition: 'color 0.15s ease',
+              }}
+            >
+              <input 
+                type="checkbox" 
+                checked={!hiddenWidgets.includes(id)} 
+                onChange={() => toggleWidget(id)}
+                style={{ accentColor: 'var(--color-accent)' }}
+              />
+              {id.charAt(0).toUpperCase() + id.slice(1)}
+            </label>
+          ))}
         </div>
       )}
 
-      {/* ── Stat Cards Row ──────────────────────────────── */}
+      {/* ── KPI Stat Cards ─────────────────────────────────── */}
       {!hiddenWidgets.includes('stats') && (
         <div
           style={{
@@ -125,12 +170,12 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── Visitor Trend Chart ─────────────────────────── */}
+      {/* ── Visitor Trend Chart ─────────────────────────────── */}
       {!hiddenWidgets.includes('trend') && (
         <VisitorChart data={data.timeseries} annotations={data.annotations} />
       )}
 
-      {/* ── Two-Column: Top Pages + Top Sources ─────────── */}
+      {/* ── Two-Column: Top Pages + Top Sources ───────────── */}
       <div
         style={{
           display: 'grid',
@@ -146,15 +191,20 @@ export default function DashboardPage() {
               {
                 key: 'url' as const,
                 label: 'Page',
-                render: (v) => (
-                  <span
-                    style={{
-                      color: 'var(--color-accent)',
-                      fontWeight: 500,
-                    }}
-                  >
-                    {String(v)}
-                  </span>
+                render: (v, row) => (
+                  <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span
+                      style={{
+                        color: 'var(--color-accent)',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {String(v)}
+                    </span>
+                    {selectedSite === 'all' && row.siteIds && (
+                      <SiteFavicons siteIds={row.siteIds} sites={sites} />
+                    )}
+                  </div>
                 ),
               },
               { key: 'views' as const, label: 'Views', align: 'right' as const },
@@ -171,6 +221,9 @@ export default function DashboardPage() {
               },
             ]}
             data={data.topPages}
+            onRowClick={(row) => toggleFilter('pages', row.url)}
+            selectedValues={activeFilters.pages}
+            selectableKey="url"
           />
         )}
 
@@ -182,8 +235,13 @@ export default function DashboardPage() {
               {
                 key: 'referrer' as const,
                 label: 'Source',
-                render: (v) => (
-                  <span style={{ fontWeight: 500 }}>{String(v)}</span>
+                render: (v, row) => (
+                  <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 500 }}>{String(v)}</span>
+                    {selectedSite === 'all' && row.siteIds && (
+                      <SiteFavicons siteIds={row.siteIds} sites={sites} />
+                    )}
+                  </div>
                 ),
               },
               {
@@ -223,17 +281,22 @@ export default function DashboardPage() {
                         }}
                       />
                     </div>
-                    <span>{Number(v).toFixed(1)}%</span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {Number(v).toFixed(1)}%
+                    </span>
                   </div>
                 ),
               },
             ]}
             data={data.topSources}
+            onRowClick={(row) => toggleFilter('sources', row.referrer)}
+            selectedValues={activeFilters.sources}
+            selectableKey="referrer"
           />
         )}
       </div>
 
-      {/* ── Three-Column: Devices, Browsers, Countries ── */}
+      {/* ── Three-Column: Devices, Browsers, Countries ───── */}
       <div
         style={{
           display: 'grid',
@@ -241,8 +304,20 @@ export default function DashboardPage() {
           gap: '1rem',
         }}
       >
-        {!hiddenWidgets.includes('devices') && <DonutChart data={data.deviceBreakdown} />}
-        {!hiddenWidgets.includes('browsers') && <BarChart data={data.browserStats} />}
+        {!hiddenWidgets.includes('devices') && (
+          <DonutChart
+            data={data.deviceBreakdown}
+            onSegmentClick={(device) => toggleFilter('devices', device)}
+            selectedDevices={activeFilters.devices}
+          />
+        )}
+        {!hiddenWidgets.includes('browsers') && (
+          <BarChart
+            data={data.browserStats}
+            onBarClick={(browser) => toggleFilter('browsers', browser)}
+            selectedBrowsers={activeFilters.browsers}
+          />
+        )}
 
         {/* Countries */}
         {!hiddenWidgets.includes('countries') && (
@@ -264,10 +339,17 @@ export default function DashboardPage() {
                 key: 'visitors' as const,
                 label: 'Visitors',
                 align: 'right' as const,
-                render: (v) => Number(v).toLocaleString(),
+                render: (v) => (
+                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {Number(v).toLocaleString()}
+                  </span>
+                ),
               },
             ]}
             data={data.countryStats}
+            onRowClick={(row) => toggleFilter('countries', row.country)}
+            selectedValues={activeFilters.countries}
+            selectableKey="country"
           />
         )}
       </div>

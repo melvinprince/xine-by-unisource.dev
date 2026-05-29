@@ -5,10 +5,13 @@ import { gsap } from 'gsap';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import type { DeviceBreakdown } from '@/lib/types';
 import { Monitor, Smartphone, Tablet } from 'lucide-react';
+import SectionHeader from '@/components/SectionHeader';
 
 interface DonutChartProps {
   data: DeviceBreakdown;
   title?: string;
+  onSegmentClick?: (segmentName: string) => void;
+  selectedDevices?: string[];
 }
 
 const COLORS = [
@@ -29,20 +32,22 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
     <div
       style={{
         background: 'var(--color-bg-raised)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
         border: '1px solid var(--color-border-subtle)',
         borderRadius: 'var(--radius-md)',
         padding: '0.5rem 0.75rem',
         boxShadow: 'var(--shadow-lg)',
       }}
     >
-      <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+      <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-primary)', fontVariantNumeric: 'tabular-nums' }}>
         {payload[0].name}: {payload[0].value.toLocaleString()}
       </p>
     </div>
   );
 }
 
-export default function DonutChart({ data, title = "Devices" }: DonutChartProps) {
+export default function DonutChart({ data, title = "Devices", onSegmentClick, selectedDevices }: DonutChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const chartData = [
@@ -69,16 +74,7 @@ export default function DonutChart({ data, title = "Devices" }: DonutChartProps)
       className="glass-card"
       style={{ padding: '1.5rem', opacity: 0 }}
     >
-      <h3
-        style={{
-          fontSize: '0.9375rem',
-          fontWeight: 600,
-          color: 'var(--color-text-primary)',
-          marginBottom: '1rem',
-        }}
-      >
-        {title}
-      </h3>
+      <SectionHeader title={title} />
 
       <div style={{ width: '100%', height: 200 }}>
         <ResponsiveContainer>
@@ -93,10 +89,27 @@ export default function DonutChart({ data, title = "Devices" }: DonutChartProps)
               dataKey="value"
               animationDuration={1200}
               animationBegin={600}
+              onClick={(segmentData: any) => {
+                if (segmentData && onSegmentClick) {
+                  onSegmentClick(segmentData.name.toLowerCase());
+                }
+              }}
             >
-              {chartData.map((_, index) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index]} />
-              ))}
+              {chartData.map((entry, index) => {
+                const isSelected = selectedDevices && selectedDevices.includes(entry.name.toLowerCase());
+                const isAnySelected = selectedDevices && selectedDevices.length > 0;
+                const fill = isAnySelected ? (isSelected ? COLORS[index] : 'var(--color-border-subtle)') : COLORS[index];
+                return (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={fill}
+                    style={{
+                      cursor: onSegmentClick ? 'pointer' : 'default',
+                      transition: 'fill 0.2s ease',
+                    }}
+                  />
+                );
+              })}
             </Pie>
             <Tooltip content={<CustomTooltip />} />
           </PieChart>
@@ -115,15 +128,22 @@ export default function DonutChart({ data, title = "Devices" }: DonutChartProps)
         {chartData.map((entry, index) => {
           const Icon = ICONS[index].icon;
           const pct = ((entry.value / total) * 100).toFixed(1);
+          const isSelected = selectedDevices && selectedDevices.includes(entry.name.toLowerCase());
+          const isAnySelected = selectedDevices && selectedDevices.length > 0;
           return (
             <div
               key={entry.name}
+              onClick={() => onSegmentClick && onSegmentClick(entry.name.toLowerCase())}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem',
                 fontSize: '0.8125rem',
+                cursor: onSegmentClick ? 'pointer' : 'default',
+                opacity: isAnySelected && !isSelected ? 0.35 : 1,
+                transition: 'all 0.2s ease',
               }}
+              className="legend-item"
             >
               <div
                 style={{
@@ -132,13 +152,15 @@ export default function DonutChart({ data, title = "Devices" }: DonutChartProps)
                   borderRadius: '50%',
                   background: COLORS[index],
                   flexShrink: 0,
+                  boxShadow: isSelected ? `0 0 0 2px var(--color-bg-base), 0 0 0 4px ${COLORS[index]}` : undefined,
+                  transition: 'box-shadow 0.2s ease',
                 }}
               />
-              <Icon size={14} style={{ color: 'var(--color-text-muted)' }} />
-              <span style={{ color: 'var(--color-text-secondary)', flex: 1 }}>
+              <Icon size={14} style={{ color: isSelected ? 'var(--color-accent)' : 'var(--color-text-muted)' }} />
+              <span style={{ color: isSelected ? 'var(--color-text-primary)' : 'var(--color-text-secondary)', flex: 1, fontWeight: isSelected ? 600 : 400 }}>
                 {entry.name}
               </span>
-              <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+              <span style={{ color: 'var(--color-text-primary)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                 {pct}%
               </span>
             </div>

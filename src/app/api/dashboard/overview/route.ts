@@ -18,7 +18,8 @@ import {
  * Aggregates all dashboard overview data into a single response.
  * Query params: ?siteId=all&from=2026-01-01&to=2026-03-09
  */
-import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse } from "@/lib/api-helpers";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, parseFilters } from "@/lib/api-helpers";
+import { filterStore } from "@/lib/filter-store";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -35,44 +36,49 @@ export async function GET(request: NextRequest) {
   if (!dateRange) return invalidDateResponse();
 
   const { from, to } = dateRange;
+  const filters = parseFilters(searchParams);
 
   try {
-    const [
-      stats,
-      timeseries,
-      topPages,
-      topSources,
-      deviceBreakdown,
-      browserStats,
-      countryStats,
-      siteAnnotations,
-    ] = await Promise.all([
-      getOverviewStats(siteId, dateRange),
-      getVisitorTimeseries(siteId, dateRange),
-      getTopPages(siteId, dateRange),
-      getTopSources(siteId, dateRange),
-      getDeviceBreakdown(siteId, dateRange),
-      getBrowserBreakdown(siteId, dateRange),
-      getCountryBreakdown(siteId, dateRange),
-      siteId === "all" ? Promise.resolve([]) : db.select().from(annotations).where(
-        and(
-          eq(annotations.site_id, siteId),
-          gte(annotations.date, from),
-          lte(annotations.date, to)
+    const data = await filterStore.run(filters, async () => {
+      const [
+        stats,
+        timeseries,
+        topPages,
+        topSources,
+        deviceBreakdown,
+        browserStats,
+        countryStats,
+        siteAnnotations,
+      ] = await Promise.all([
+        getOverviewStats(siteId, dateRange, filters),
+        getVisitorTimeseries(siteId, dateRange, filters),
+        getTopPages(siteId, dateRange, 10, filters),
+        getTopSources(siteId, dateRange, 10, filters),
+        getDeviceBreakdown(siteId, dateRange, filters),
+        getBrowserBreakdown(siteId, dateRange, 8, filters),
+        getCountryBreakdown(siteId, dateRange, 10, filters),
+        siteId === "all" ? Promise.resolve([]) : db.select().from(annotations).where(
+          and(
+            eq(annotations.site_id, siteId),
+            gte(annotations.date, from),
+            lte(annotations.date, to)
+          )
         )
-      )
-    ]);
+      ]);
 
-    return NextResponse.json({
-      stats,
-      timeseries,
-      topPages,
-      topSources,
-      deviceBreakdown,
-      browserStats,
-      countryStats,
-      annotations: siteAnnotations,
+      return {
+        stats,
+        timeseries,
+        topPages,
+        topSources,
+        deviceBreakdown,
+        browserStats,
+        countryStats,
+        annotations: siteAnnotations,
+      };
     });
+
+    return NextResponse.json(data);
   } catch (error) {
     console.error("Dashboard overview error:", error);
     return NextResponse.json(

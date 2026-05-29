@@ -7,7 +7,8 @@ import {
   getUserFlows,
   getPagesPerSessionDistribution,
 } from "@/lib/queries-advanced";
-import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse } from "@/lib/api-helpers";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, parseFilters } from "@/lib/api-helpers";
+import { filterStore } from "@/lib/filter-store";
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,24 +25,30 @@ export async function GET(request: NextRequest) {
     const dateRange = parseDateRange(from, to);
     if (!dateRange) return invalidDateResponse();
 
-    const [entryPages, exitPages, exitRates, scrollDepth, userFlows, pagesPerSession] =
-      await Promise.all([
-        getEntryPages(siteId, dateRange),
-        getExitPages(siteId, dateRange),
-        getPageExitRates(siteId, dateRange),
-        getScrollDepthAnalysis(siteId, dateRange),
-        getUserFlows(siteId, dateRange),
-        getPagesPerSessionDistribution(siteId, dateRange),
-      ]);
+    const filters = parseFilters(searchParams);
 
-    return NextResponse.json({
-      entryPages,
-      exitPages,
-      exitRates,
-      scrollDepth,
-      userFlows,
-      pagesPerSession,
+    const data = await filterStore.run(filters, async () => {
+      const [entryPages, exitPages, exitRates, scrollDepth, userFlows, pagesPerSession] =
+        await Promise.all([
+          getEntryPages(siteId, dateRange),
+          getExitPages(siteId, dateRange),
+          getPageExitRates(siteId, dateRange),
+          getScrollDepthAnalysis(siteId, dateRange),
+          getUserFlows(siteId, dateRange),
+          getPagesPerSessionDistribution(siteId, dateRange),
+        ]);
+
+      return {
+        entryPages,
+        exitPages,
+        exitRates,
+        scrollDepth,
+        userFlows,
+        pagesPerSession,
+      };
     });
+
+    return NextResponse.json(data);
   } catch (error) {
     console.error("[behavior] Error:", error);
     return NextResponse.json(

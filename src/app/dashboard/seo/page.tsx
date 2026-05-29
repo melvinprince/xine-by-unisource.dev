@@ -5,6 +5,8 @@ import StatCard from "@/components/StatCard";
 import VisitorChart from "@/components/charts/VisitorChart";
 import DataTable from "@/components/DataTable";
 import HelpTooltip from "@/components/HelpTooltip";
+import PageHeader from "@/components/PageHeader";
+import SectionHeader from "@/components/SectionHeader";
 import { LoadingState, EmptyState, ErrorState } from "@/components/DataStates";
 import { useDashboardContext } from "@/components/DashboardContext";
 import { useDashboardFetch } from "@/hooks/use-dashboard-data";
@@ -18,11 +20,12 @@ interface SEOData {
 }
 
 export default function SEOOverviewPage() {
-  const { selectedSite, dateRange } = useDashboardContext();
+  const { selectedSite, dateRange, activeFilters } = useDashboardContext();
   const { data, loading, error, refetch } = useDashboardFetch<SEOData>(
     "/api/dashboard/seo",
     selectedSite,
-    dateRange
+    dateRange,
+    activeFilters
   );
 
   if (loading) return <LoadingState message="Analyzing search traffic..." />;
@@ -40,41 +43,87 @@ export default function SEOOverviewPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">SEO Overview <HelpTooltip title="SEO Overview" content="Analyze organic traffic from search engines. Tracks visitors arriving from Google, Bing, Yahoo, DuckDuckGo and other search engines." /></h1>
-          <p style={{ color: 'var(--color-text-secondary)' }}>Analyze organic traffic performance and discoverability.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="SEO"
+        description="Organic search traffic and landing page performance"
+        icon={<Search size={20} />}
+      />
 
       {/* Stat Cards Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
+          gap: '1rem',
+        }}
+      >
         <StatCard label="Organic Visitors" value={data.organicVisitors} icon={<Search size={20} />} delay={0.1} />
         <StatCard label="Organic Pageviews" value={data.organicPageviews} icon={<BarChart3 size={20} />} delay={0.2} />
       </div>
 
       {/* Visitor Trend Chart */}
-      <VisitorChart data={data.timeseries} annotations={[]} />
+      <div className="glass-card" style={{ padding: '1.5rem' }}>
+        <SectionHeader title="Organic Traffic Trend" />
+        <VisitorChart data={data.timeseries} annotations={[]} />
+      </div>
 
       {/* Tables */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <DataTable
-          title="Top Search Engines" delay={0.4}
-          columns={[
-            { key: 'engine', label: 'Search Engine', render: (v) => <span className="font-medium">{String(v)}</span> },
-            { key: 'visitors', label: 'Visitors', align: 'right' },
-            { key: 'views', label: 'Pageviews', align: 'right' },
-          ]}
-          data={data.topEngines}
-        />
-        <DataTable
-          title="Organic Landing Pages" delay={0.5}
-          columns={[
-            { key: 'url', label: 'Landing Page', render: (v) => <span className="text-emerald-400 font-medium">{String(v)}</span> },
-            { key: 'visitors', label: 'Organic Entrances', align: 'right' },
-          ]}
-          data={data.topLandingPages}
-        />
+      <div>
+        <SectionHeader title="Search Engines & Landing Pages" />
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))',
+            gap: '1rem',
+          }}
+        >
+          <DataTable
+            title="Top Search Engines"
+            delay={0.4}
+            columns={[
+              {
+                key: 'engine',
+                label: 'Search Engine',
+                render: (v) => (
+                  <span style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>{String(v)}</span>
+                ),
+              },
+              {
+                key: 'visitors',
+                label: 'Visitors',
+                align: 'right',
+                render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Number(v).toLocaleString()}</span>,
+              },
+              {
+                key: 'views',
+                label: 'Pageviews',
+                align: 'right',
+                render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Number(v).toLocaleString()}</span>,
+              },
+            ]}
+            data={data.topEngines}
+          />
+          <DataTable
+            title="Organic Landing Pages"
+            delay={0.5}
+            columns={[
+              {
+                key: 'url',
+                label: 'Landing Page',
+                render: (v) => (
+                  <span style={{ color: 'var(--color-success)', fontWeight: 500 }}>{String(v)}</span>
+                ),
+              },
+              {
+                key: 'visitors',
+                label: 'Organic Entrances',
+                align: 'right',
+                render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Number(v).toLocaleString()}</span>,
+              },
+            ]}
+            data={data.topLandingPages}
+          />
+        </div>
       </div>
     </div>
   );

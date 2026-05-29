@@ -3,6 +3,14 @@
 import { createContext, useContext } from 'react';
 import type { Site } from '@/lib/types';
 
+export interface ActiveFilters {
+  countries: string[];
+  browsers: string[];
+  devices: string[];
+  sources: string[];
+  pages: string[];
+}
+
 export interface DateRangeState {
   from: string;
   to: string;
@@ -17,6 +25,11 @@ interface DashboardContextValue {
   sites: Site[];
   sitesLoading: boolean;
   refetchSites: () => void;
+  activeFilters: ActiveFilters;
+  setActiveFilters: (filters: ActiveFilters) => void;
+  toggleFilter: (dimension: keyof ActiveFilters, value: string) => void;
+  clearFilters: () => void;
+  hasActiveFilters: boolean;
 }
 
 // Compute default date range lazily (avoid SSR/client mismatch)
@@ -33,6 +46,14 @@ export function getDefaultDateRange(): DateRangeState {
   };
 }
 
+export const initialFilters: ActiveFilters = {
+  countries: [],
+  browsers: [],
+  devices: [],
+  sources: [],
+  pages: [],
+};
+
 export const DashboardContext = createContext<DashboardContextValue>({
   selectedSite: 'all',
   setSelectedSite: () => {},
@@ -41,8 +62,14 @@ export const DashboardContext = createContext<DashboardContextValue>({
   sites: [],
   sitesLoading: true,
   refetchSites: () => {},
+  activeFilters: initialFilters,
+  setActiveFilters: () => {},
+  toggleFilter: () => {},
+  clearFilters: () => {},
+  hasActiveFilters: false,
 });
 
 export function useDashboardContext() {
   return useContext(DashboardContext);
 }
+
