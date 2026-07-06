@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
+import { useDashboardContext } from './DashboardContext';
 import ThemeToggle from './ThemeToggle';
 import {
   LayoutDashboard,
@@ -85,6 +86,7 @@ interface SidebarProps {
 export default function Sidebar({ onCollapse }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user } = useDashboardContext();
   const pathname = usePathname();
   const sidebarRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -362,6 +364,54 @@ export default function Sidebar({ onCollapse }: SidebarProps) {
             {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
             {!collapsed && 'Collapse'}
           </button>
+
+          {/* User Profile */}
+          {user && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                gap: '0.75rem',
+                width: '100%',
+                padding: '0.5rem 0.75rem',
+                marginBottom: '0.25rem',
+                background: 'var(--color-bg-raised)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-md)',
+                marginTop: '0.5rem'
+              }}
+              title={collapsed ? user.email : undefined}
+            >
+              <div
+                style={{
+                  width: '24px',
+                  height: '24px',
+                  borderRadius: '50%',
+                  background: 'var(--color-accent)',
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  flexShrink: 0
+                }}
+              >
+                {user.name?.[0]?.toUpperCase() || user.email[0].toUpperCase()}
+              </div>
+              {!collapsed && (
+                <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                    {user.name || 'User'}
+                  </span>
+                  <span style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                    {user.email}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Logout */}
           <button

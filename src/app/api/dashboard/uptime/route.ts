@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { uptimeChecks, sites } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 import { isPrivateUrl } from "@/lib/ssrf";
 import { validateOrThrow, siteIdSchema, uuidSchema, ValidationError } from "@/lib/validation";
+import { getUserFromRequest, getUserAccessibleSiteIds, verifyUserSiteAccess } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const rawSiteId = searchParams.get("siteId");
@@ -14,16 +17,16 @@ export async function GET(request: NextRequest) {
     const siteId = validateOrThrow(siteIdSchema, rawSiteId);
 
     if (siteId !== "all") {
-      const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
-      if (!site) return NextResponse.json({ error: "Site not found" }, { status: 404 });
+      const hasAccess = await verifyUserSiteAccess(userId, siteId);
+      if (!hasAccess) return NextResponse.json({ error: "Site not found" }, { status: 404 });
     }
 
-    const checksQuery = siteId === "all" 
-      ? db.select().from(uptimeChecks).orderBy(desc(uptimeChecks.checked_at)).limit(100)
-      : db.select().from(uptimeChecks).where(eq(uptimeChecks.site_id, siteId)).orderBy(desc(uptimeChecks.checked_at)).limit(100);
+    const accessibleSites = siteId === "all" ? await getUserAccessibleSiteIds(userId) : [siteId];
+
+    const checks = accessibleSites.length > 0 
+      ? await db.select().from(uptimeChecks).where(inArray(uptimeChecks.site_id, accessibleSites)).orderBy(desc(uptimeChecks.checked_at)).limit(100)
+      : [];
       
-    const checks = await checksQuery;
-    
     return NextResponse.json({ checks });
   } catch (error) {
     if (error instanceof ValidationError) {
@@ -35,6 +38,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const body = await request.json();
     const { siteId: rawSiteId, url } = body;
@@ -43,8 +48,8 @@ export async function POST(request: NextRequest) {
 
     const siteId = validateOrThrow(uuidSchema, rawSiteId);
 
-    const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
-    if (!site) return NextResponse.json({ error: "Site not found" }, { status: 404 });
+    const hasAccess = await verifyUserSiteAccess(userId, siteId);
+    if (!hasAccess) return NextResponse.json({ error: "Site not found" }, { status: 404 });
 
     if (isPrivateUrl(url)) {
       return NextResponse.json({ error: "URL blocked: private/internal addresses are not allowed" }, { status: 400 });

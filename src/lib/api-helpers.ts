@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { sites } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { sites, userSites } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
 
 export interface ParsedParams {
   siteId: string;
@@ -42,13 +42,44 @@ export function parseDateRange(from: string | null, to: string | null, rangePres
   return { from: fromDate, to: toDate };
 }
 
-export async function verifySiteExists(siteId: string): Promise<boolean> {
+export function getUserFromRequest(request: NextRequest): string | null {
+  return request.headers.get("x-user-id");
+}
+
+export async function getUserAccessibleSiteIds(userId: string): Promise<string[]> {
+  const accessibleSites = await db
+    .select({ site_id: userSites.site_id })
+    .from(userSites)
+    .where(eq(userSites.user_id, userId));
+  return accessibleSites.map(s => s.site_id);
+}
+
+export async function verifyUserSiteAccess(userId: string, siteId: string): Promise<boolean> {
+  const access = await db
+    .select({ id: userSites.id })
+    .from(userSites)
+    .where(and(eq(userSites.user_id, userId), eq(userSites.site_id, siteId)))
+    .limit(1);
+  return access.length > 0;
+}
+
+export async function verifySiteExists(siteId: string, request?: NextRequest): Promise<boolean> {
   if (siteId === "all") return true;
   // UUID format check
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(siteId)) return false;
+  
   try {
     const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
-    return !!site;
+    if (!site) return false;
+
+    if (request) {
+      const userId = getUserFromRequest(request);
+      if (userId) {
+        return verifyUserSiteAccess(userId, siteId);
+      }
+    }
+    
+    return true;
   } catch {
     return false;
   }

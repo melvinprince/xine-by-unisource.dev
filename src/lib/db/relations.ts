@@ -12,6 +12,9 @@ import {
   emailReports,
   uptimeChecks,
   alerts,
+  users,
+  userSites,
+  passwordResetOtps,
 } from "./schema";
 
 // ---- Site Relations ----
@@ -26,6 +29,11 @@ export const sitesRelations = relations(sites, ({ many, one }) => ({
   emailReports: many(emailReports),
   uptimeChecks: many(uptimeChecks),
   alerts: many(alerts),
+  owner: one(users, {
+    fields: [sites.owner_id],
+    references: [users.id],
+  }),
+  userSites: many(userSites),
 }));
 
 // ---- Pageview Relations ----
@@ -124,5 +132,32 @@ export const alertsRelations = relations(alerts, ({ one }) => ({
   site: one(sites, {
     fields: [alerts.site_id],
     references: [sites.id],
+  }),
+}));
+
+// ---- User Relations ----
+export const usersRelations = relations(users, ({ many }) => ({
+  sites: many(sites),
+  userSites: many(userSites),
+  passwordResetOtps: many(passwordResetOtps),
+}));
+
+// ---- User Sites Relations ----
+export const userSitesRelations = relations(userSites, ({ one }) => ({
+  user: one(users, {
+    fields: [userSites.user_id],
+    references: [users.id],
+  }),
+  site: one(sites, {
+    fields: [userSites.site_id],
+    references: [sites.id],
+  }),
+}));
+
+// ---- Password Reset OTPs Relations ----
+export const passwordResetOtpsRelations = relations(passwordResetOtps, ({ one }) => ({
+  user: one(users, {
+    fields: [passwordResetOtps.user_id],
+    references: [users.id],
   }),
 }));

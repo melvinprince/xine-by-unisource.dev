@@ -106,39 +106,48 @@ function applyDimensionFilters(
   }
 }
 
-function buildSessionFilters(siteId: string | "all", dateRange: DateRange, filters?: DimensionFilters) {
+function buildSessionFilters(siteId: string | string[], dateRange: DateRange, filters?: DimensionFilters) {
   const conditions = [
     gte(sessions.started_at, dateRange.from),
     lte(sessions.started_at, dateRange.to),
     eq(sessions.is_bot, false),
   ];
-  if (siteId !== "all") {
+  if (Array.isArray(siteId)) {
+    if (siteId.length > 0) conditions.push(inArray(sessions.site_id, siteId));
+    else conditions.push(sql`1 = 0`);
+  } else if (siteId !== "all") {
     conditions.push(eq(sessions.site_id, siteId));
   }
   applyDimensionFilters(conditions, sessions, filters);
   return and(...conditions);
 }
 
-function buildEventFilters(siteId: string | "all", dateRange: DateRange, filters?: DimensionFilters) {
+function buildEventFilters(siteId: string | string[], dateRange: DateRange, filters?: DimensionFilters) {
   const conditions = [
     gte(events.created_at, dateRange.from),
     lte(events.created_at, dateRange.to),
     eq(events.is_bot, false),
   ];
-  if (siteId !== "all") {
+  if (Array.isArray(siteId)) {
+    if (siteId.length > 0) conditions.push(inArray(events.site_id, siteId));
+    else conditions.push(sql`1 = 0`);
+  } else if (siteId !== "all") {
     conditions.push(eq(events.site_id, siteId));
   }
   applyDimensionFilters(conditions, events, filters);
   return and(...conditions);
 }
 
-function buildPageviewFilters(siteId: string | "all", dateRange: DateRange, filters?: DimensionFilters) {
+function buildPageviewFilters(siteId: string | string[], dateRange: DateRange, filters?: DimensionFilters) {
   const conditions = [
     gte(pageviews.created_at, dateRange.from),
     lte(pageviews.created_at, dateRange.to),
     eq(pageviews.is_bot, false),
   ];
-  if (siteId !== "all") {
+  if (Array.isArray(siteId)) {
+    if (siteId.length > 0) conditions.push(inArray(pageviews.site_id, siteId));
+    else conditions.push(sql`1 = 0`);
+  } else if (siteId !== "all") {
     conditions.push(eq(pageviews.site_id, siteId));
   }
   applyDimensionFilters(conditions, pageviews, filters);
@@ -171,7 +180,7 @@ function rateVital(
 // ============================================================
 
 export async function getSessionAnalytics(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ): Promise<SessionAnalytics> {
   const prevRange = getPreviousDateRange(dateRange);
@@ -245,7 +254,7 @@ export async function getSessionAnalytics(
 }
 
 export async function getNewVsReturning(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ): Promise<NewVsReturning> {
   const totalQuery = await db
@@ -286,7 +295,7 @@ export async function getNewVsReturning(
 }
 
 export async function getSessionTimeseries(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ): Promise<SessionTimeseriesPoint[]> {
   const dateExpr = buildDateExpr(dateRange, sessions.started_at);
@@ -309,7 +318,7 @@ export async function getSessionTimeseries(
 // ============================================================
 
 export async function getEngagementMetrics(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ): Promise<EngagementMetrics> {
   const scrollSub = db
@@ -383,7 +392,7 @@ export async function getEngagementMetrics(
 }
 
 export async function getScrollDepthAnalysis(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ): Promise<ScrollDepthEntry[]> {
   const rows = await db
@@ -413,7 +422,7 @@ export async function getScrollDepthAnalysis(
 // ============================================================
 
 export async function getHourlyHeatmap(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ): Promise<HeatmapCell[]> {
   const rows = await db
@@ -449,7 +458,7 @@ export async function getHourlyHeatmap(
 }
 
 export async function getPeakHours(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ): Promise<PeakHour[]> {
   const rows = await db
@@ -475,7 +484,7 @@ export async function getPeakHours(
 // ============================================================
 
 export async function getEntryPages(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 10
 ): Promise<EntryExitPage[]> {
@@ -505,7 +514,7 @@ export async function getEntryPages(
 }
 
 export async function getExitPages(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 10
 ): Promise<EntryExitPage[]> {
@@ -535,7 +544,7 @@ export async function getExitPages(
 }
 
 export async function getPageExitRates(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 10
 ): Promise<PageExitRate[]> {
@@ -575,7 +584,7 @@ export async function getPageExitRates(
 // ============================================================
 
 export async function getUserFlows(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 15
 ): Promise<UserFlowStep[]> {
@@ -605,7 +614,7 @@ export async function getUserFlows(
 }
 
 export async function getPagesPerSessionDistribution(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ): Promise<PagesPerSessionBucket[]> {
   const bucketQuery = db
@@ -654,7 +663,7 @@ export async function getPagesPerSessionDistribution(
 // ============================================================
 
 export async function getWebVitalsTrends(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ): Promise<WebVitalTrend[]> {
   const dateExpr = buildDateExpr(dateRange, events.created_at);
@@ -710,7 +719,7 @@ export async function getWebVitalsTrends(
 }
 
 export async function getWebVitalsByPage(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 10
 ): Promise<PageWebVital[]> {
@@ -757,7 +766,7 @@ export async function getWebVitalsByPage(
 // ============================================================
 
 export async function getErrorTrend(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ): Promise<ErrorTrendPoint[]> {
   const dateExpr = buildDateExpr(dateRange, events.created_at);
@@ -776,7 +785,7 @@ export async function getErrorTrend(
 }
 
 export async function getTopErrors(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 10
 ): Promise<ErrorEntry[]> {
@@ -808,7 +817,7 @@ export async function getTopErrors(
 // ============================================================
 
 export async function getCampaignPerformance(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 10
 ): Promise<CampaignPerformance[]> {
@@ -840,7 +849,7 @@ export async function getCampaignPerformance(
 }
 
 export async function getSourceQuality(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 10
 ): Promise<SourceQuality[]> {
@@ -896,7 +905,7 @@ export async function getSourceQuality(
 // ============================================================
 
 export async function getConnectionTypes(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ): Promise<ConnectionTypeEntry[]> {
   const rows = await db
@@ -922,11 +931,19 @@ export async function getConnectionTypes(
 // ============================================================
 
 export async function getRealtimeStats(
-  siteId: string | "all"
+  siteId: string | string[]
 ): Promise<RealtimeStats> {
   const thirtyMinAgo = subMinutes(new Date(), 30);
   const conditions = [gte(pageviews.created_at, thirtyMinAgo)];
-  if (siteId !== "all") conditions.push(eq(pageviews.site_id, siteId));
+  if (Array.isArray(siteId)) {
+    if (siteId.length > 0) {
+      conditions.push(inArray(pageviews.site_id, siteId));
+    } else {
+      conditions.push(sql`1 = 0`);
+    }
+  } else if (siteId !== "all") {
+    conditions.push(eq(pageviews.site_id, siteId));
+  }
   applyDimensionFilters(conditions, pageviews);
 
   const stats = await db
@@ -980,7 +997,7 @@ export async function getRealtimeStats(
 // ============================================================
 
 export async function getSeoOverview(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange
 ) {
   const dateExpr = buildDateExpr(dateRange, pageviews.created_at);

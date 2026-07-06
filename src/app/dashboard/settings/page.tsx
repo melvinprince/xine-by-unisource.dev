@@ -33,7 +33,7 @@ export default function SettingsPage() {
   const [newSiteDomain, setNewSiteDomain] = useState('');
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState('');
-  const [activeTab, setActiveTab] = useState<'integration' | 'features'>('integration');
+  const [activeTab, setActiveTab] = useState<'integration' | 'features' | 'members'>('integration');
   
   const pageRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -484,6 +484,22 @@ export default function SettingsPage() {
                     >
                       Feature Toggles
                     </button>
+                    <button
+                      onClick={() => setActiveTab('members')}
+                      style={{
+                        padding: '0.5rem 0.25rem',
+                        background: 'none',
+                        border: 'none',
+                        borderBottom: activeTab === 'members' ? '2px solid var(--color-accent)' : '2px solid transparent',
+                        color: activeTab === 'members' ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                        fontWeight: activeTab === 'members' ? 600 : 500,
+                        cursor: 'pointer',
+                        fontSize: '0.875rem',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      Members
+                    </button>
                   </div>
 
                   {activeTab === 'integration' ? (
@@ -651,8 +667,10 @@ export default function SettingsPage() {
                         </div>
                       </div>
                     </div>
-                  ) : (
+                  ) : activeTab === 'features' ? (
                     <SiteFeaturesForm siteId={showDetail.id} />
+                  ) : (
+                    <SiteMembersManager siteId={showDetail.id} />
                   )}
                 </div>
               ) : null}
@@ -1030,6 +1048,252 @@ function BannedLoginsManager() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Site Members Manager ──
+interface SiteMember {
+  id: string;
+  user_id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  created_at: string;
+}
+
+interface SiteInvite {
+  id: string;
+  email: string;
+  role: string;
+  created_at: string;
+  expires_at: string;
+}
+
+function SiteMembersManager({ siteId }: { siteId: string }) {
+  const [members, setMembers] = useState<SiteMember[]>([]);
+  const [invites, setInvites] = useState<SiteInvite[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newEmail, setNewEmail] = useState('');
+  const [newRole, setNewRole] = useState('viewer');
+  const [addLoading, setAddLoading] = useState(false);
+  const [error, setError] = useState('');
+  const { user } = useDashboardContext();
+
+  const fetchMembers = async () => {
+    try {
+      const res = await fetch(`/api/sites/${siteId}/members`);
+      if (res.ok) {
+        const data = await res.json();
+        setMembers(data.members || []);
+        setInvites(data.pendingInvites || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch members:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMembers();
+  }, [siteId]);
+
+  const handleAddMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newEmail) return;
+    setAddLoading(true);
+    setError('');
+
+    try {
+      const res = await fetch(`/api/sites/${siteId}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: newEmail, role: newRole }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to add member or send invite');
+      }
+
+      setNewEmail('');
+      setNewRole('viewer');
+      fetchMembers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setAddLoading(false);
+    }
+  };
+
+  const handleRemoveMember = async (memberId: string) => {
+    if (!window.confirm('Are you sure you want to remove this member?')) return;
+    
+    try {
+      const res = await fetch(`/api/sites/${siteId}/members/${memberId}`, {
+        method: 'DELETE',
+      });
+      
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to remove member');
+      }
+      
+      setMembers(prev => prev.filter(m => m.id !== memberId));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to remove member');
+    }
+  };
+
+  const handleRevokeInvite = async (inviteId: string) => {
+    if (!window.confirm('Are you sure you want to revoke this invitation?')) return;
+    
+    try {
+      const res = await fetch(`/api/sites/${siteId}/members/invites/${inviteId}`, {
+        method: 'DELETE',
+      });
+      
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to revoke invite');
+      }
+      
+      setInvites(prev => prev.filter(i => i.id !== inviteId));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to revoke invite');
+    }
+  };
+
+  const currentUserRole = members.find(m => m.user_id === user?.id)?.role;
+  const isOwner = currentUserRole === 'owner';
+
+  if (loading) {
+    return <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-muted)' }}>Loading members...</div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Add Member Form (Only for Owners) */}
+      {isOwner && (
+        <form onSubmit={handleAddMember} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', background: 'var(--color-bg-base)', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-subtle)' }}>
+          <h4 style={{ margin: 0, fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Invite Member</h4>
+          
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+            <div style={{ flex: 1 }}>
+              <input
+                type="email"
+                placeholder="Email address"
+                className="input-base"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                required
+              />
+            </div>
+            <div style={{ width: '120px' }}>
+              <select
+                className="input-base"
+                value={newRole}
+                onChange={(e) => setNewRole(e.target.value)}
+                style={{ padding: '0.625rem' }}
+              >
+                <option value="viewer">Viewer</option>
+                <option value="editor">Editor</option>
+                <option value="owner">Owner</option>
+              </select>
+            </div>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={!newEmail || addLoading}
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              <Plus size={16} />
+              {addLoading ? 'Inviting...' : 'Invite'}
+            </button>
+          </div>
+          {error && <div style={{ color: 'var(--color-danger)', fontSize: '0.75rem' }}>{error}</div>}
+        </form>
+      )}
+
+      {/* Members List */}
+      <div>
+        <h4 style={{ margin: '0 0 0.75rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Current Members</h4>
+        <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+          {members.map(member => (
+            <div key={member.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.875rem 1rem', background: 'var(--color-bg-raised)', borderBottom: '1px solid var(--color-border-subtle)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--color-accent-subtle)', color: 'var(--color-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.875rem', fontWeight: 600 }}>
+                  {member.name?.[0]?.toUpperCase() || member.email[0].toUpperCase()}
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                    {member.name || 'User'} {member.email === user?.email && <span style={{ fontSize: '0.65rem', padding: '0.125rem 0.375rem', background: 'var(--color-bg-base)', borderRadius: '4px', marginLeft: '0.25rem', color: 'var(--color-text-muted)' }}>You</span>}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{member.email}</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-secondary)', textTransform: 'capitalize', padding: '0.25rem 0.5rem', background: 'var(--color-bg-base)', borderRadius: '4px' }}>
+                  {member.role}
+                </span>
+                {(isOwner || member.email === user?.email) && (
+                  <button
+                    onClick={() => handleRemoveMember(member.id)}
+                    style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', padding: '0.25rem' }}
+                    title={member.email === user?.email ? "Leave site" : "Remove member"}
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+          {members.length === 0 && (
+            <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>
+              No members found.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Pending Invites List */}
+      {invites.length > 0 && (
+        <div>
+          <h4 style={{ margin: '0 0 0.75rem', fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Pending Invites</h4>
+          <div style={{ border: '1px dashed var(--color-border-subtle)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+            {invites.map(invite => (
+              <div key={invite.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.875rem 1rem', background: 'var(--color-bg-base)', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ width: '32px', height: '32px', borderRadius: '50%', border: '1px dashed var(--color-text-muted)', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.875rem', fontWeight: 600 }}>
+                    {invite.email[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                      Pending Invitation
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{invite.email}</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-secondary)', textTransform: 'capitalize', padding: '0.25rem 0.5rem', background: 'var(--color-bg-raised)', borderRadius: '4px' }}>
+                    {invite.role}
+                  </span>
+                  {isOwner && (
+                    <button
+                      onClick={() => handleRevokeInvite(invite.id)}
+                      style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', padding: '0.25rem', fontSize: '0.75rem', fontWeight: 500 }}
+                      title="Revoke invitation"
+                    >
+                      Revoke
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

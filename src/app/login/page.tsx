@@ -9,6 +9,7 @@ import { Lock, ArrowRight, Eye, EyeOff, ShieldAlert, AlertTriangle } from 'lucid
 gsap.registerPlugin(useGSAP);
 
 export default function LoginPage() {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -79,7 +80,7 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ email, password }),
       });
 
       const data = await res.json();
@@ -230,7 +231,7 @@ export default function LoginPage() {
         >
           {isBanned
             ? 'Access to this dashboard has been revoked'
-            : 'Enter your password to access the dashboard'}
+            : 'Enter your credentials to access the dashboard'}
         </p>
 
         {/* Card */}
@@ -278,10 +279,10 @@ export default function LoginPage() {
               </div>
             ) : (
               <>
-                {/* Password Field */}
+                {/* Email Field */}
                 <div className="login-field" style={{ marginBottom: '1rem' }}>
                   <label
-                    htmlFor="password"
+                    htmlFor="email"
                     style={{
                       display: 'block',
                       textAlign: 'left',
@@ -291,16 +292,47 @@ export default function LoginPage() {
                       marginBottom: '0.5rem',
                     }}
                   >
-                    <Lock
-                      size={14}
-                      style={{
-                        display: 'inline',
-                        verticalAlign: 'middle',
-                        marginRight: '0.375rem',
-                      }}
-                    />
-                    Dashboard Password
+                    Email Address
                   </label>
+                  <input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Enter your email"
+                    className="input-base"
+                    autoFocus
+                    required
+                  />
+                </div>
+
+                {/* Password Field */}
+                <div className="login-field" style={{ marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <label
+                      htmlFor="password"
+                      style={{
+                        display: 'block',
+                        textAlign: 'left',
+                        color: 'var(--color-text-secondary)',
+                        fontSize: '0.8125rem',
+                        fontWeight: 500,
+                      }}
+                    >
+                      <Lock
+                        size={14}
+                        style={{
+                          display: 'inline',
+                          verticalAlign: 'middle',
+                          marginRight: '0.375rem',
+                        }}
+                      />
+                      Password
+                    </label>
+                    <a href="/forgot-password" style={{ fontSize: '0.75rem', color: 'var(--color-accent)', textDecoration: 'none' }}>
+                      Forgot password?
+                    </a>
+                  </div>
                   <div style={{ position: 'relative' }}>
                     <input
                       id="password"
@@ -310,7 +342,6 @@ export default function LoginPage() {
                       placeholder="Enter your password"
                       className="input-base"
                       style={{ paddingRight: '2.75rem' }}
-                      autoFocus
                       required
                     />
                     <button
@@ -418,7 +449,7 @@ export default function LoginPage() {
             fontSize: '0.75rem',
           }}
         >
-          Single-user dashboard · No accounts required
+          Secure Access Portal
         </p>
       </div>
 

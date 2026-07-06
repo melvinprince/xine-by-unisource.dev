@@ -2,19 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { events } from "@/lib/db/schema";
 import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
-import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, parseFilters } from "@/lib/api-helpers";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, parseFilters, getUserFromRequest, getUserAccessibleSiteIds } from "@/lib/api-helpers";
 import { buildFilters } from "@/lib/queries";
 import { filterStore } from "@/lib/filter-store";
 
 export async function GET(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get("siteId") || "all";
   const fromStr = searchParams.get("from");
   const toStr = searchParams.get("to");
 
   // 1. Verify Site UUID exists in database (or is "all")
-  const exists = await verifySiteExists(siteId);
+  const exists = await verifySiteExists(siteId, request);
   if (!exists) return siteNotFoundResponse();
+
+  const targetSiteId = siteId === "all" ? await getUserAccessibleSiteIds(userId) : siteId;
 
   // 2. Safely parse and validate date range
   const dateRange = parseDateRange(fromStr, toStr);
@@ -31,7 +35,7 @@ export async function GET(request: NextRequest) {
           uniqueUsers: sql<number>`count(distinct ${events.visitor_id})::int`
         })
         .from(events)
-        .where(buildFilters(siteId, dateRange, events))
+        .where(buildFilters(targetSiteId, dateRange, events))
         .groupBy(events.name)
         .orderBy(desc(sql`count(*)`))
         .limit(50);
@@ -43,7 +47,7 @@ export async function GET(request: NextRequest) {
           count: sql<number>`count(*)::int`
         })
         .from(events)
-        .where(buildFilters(siteId, dateRange, events))
+        .where(buildFilters(targetSiteId, dateRange, events))
         .groupBy(sql`to_char(${events.created_at}, 'YYYY-MM-DD')`)
         .orderBy(sql`to_char(${events.created_at}, 'YYYY-MM-DD')`);
 

@@ -8,7 +8,8 @@ export const sites = pgTable("sites", {
   name: text("name").notNull(),
   domain: text("domain").notNull().unique(),
   api_key: text("api_key").notNull().unique(),
-  user_id: text("user_id").notNull(),
+  user_id: text("user_id").notNull(), // Legacy column
+  owner_id: uuid("owner_id").references(() => users.id, { onDelete: "cascade" }),
   is_public: boolean("is_public").default(false),
   api_access_enabled: boolean("api_access_enabled").default(false),
   server_api_key: text("server_api_key").notNull().unique(),
@@ -264,6 +265,7 @@ export const loginAttempts = pgTable(
   "login_attempts",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email"), // Track failed attempts per email
     ip: text("ip").notNull(),
     user_agent: text("user_agent").notNull(),
     attempts: integer("attempts").notNull().default(1),
@@ -271,8 +273,9 @@ export const loginAttempts = pgTable(
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    unique("uniq_ip_ua").on(table.ip, table.user_agent),
+    unique("uniq_ip_ua_email").on(table.ip, table.user_agent, table.email),
     index("idx_login_attempts_ip").on(table.ip),
+    index("idx_login_attempts_email").on(table.email),
   ]
 );
 
@@ -294,3 +297,81 @@ export const bannedLogins = pgTable(
   ]
 );
 
+// ============================================================
+// 16. USERS TABLE
+// ============================================================
+export const users = pgTable("users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  password_hash: text("password_hash").notNull(),
+  name: text("name").notNull(),
+  role: varchar("role", { length: 20 }).default("user"), // 'admin' | 'user'
+  is_active: boolean("is_active").default(true),
+  created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ============================================================
+// 17. USER SITES (Many-to-Many Access Control)
+// ============================================================
+export const userSites = pgTable(
+  "user_sites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    user_id: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    site_id: uuid("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    role: varchar("role", { length: 20 }).default("viewer"), // 'owner' | 'editor' | 'viewer'
+    granted_at: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("uniq_user_site").on(table.user_id, table.site_id),
+    index("idx_user_sites_user_id").on(table.user_id),
+    index("idx_user_sites_site_id").on(table.site_id),
+  ]
+);
+
+// ============================================================
+// 18. PASSWORD RESET OTPS
+// ============================================================
+export const passwordResetOtps = pgTable("password_reset_otps", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  user_id: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  otp_hash: text("otp_hash").notNull(),
+  expires_at: timestamp("expires_at", { withTimezone: true }).notNull(),
+  used: boolean("used").default(false),
+  created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_otp_user_id").on(table.user_id),
+]);
+
+// ============================================================
+// 19. SITE INVITES
+// ============================================================
+export const siteInvites = pgTable(
+  "site_invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    site_id: uuid("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: varchar("role", { length: 20 }).notNull().default("viewer"),
+    token: text("token").notNull().unique(),
+    invited_by: uuid("invited_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expires_at: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("idx_site_invites_email").on(table.email),
+    index("idx_site_invites_site_id").on(table.site_id),
+    unique("uniq_site_invite").on(table.site_id, table.email),
+  ]
+);

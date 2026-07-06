@@ -87,14 +87,18 @@ function timingSafeCompare(a: string, b: string): boolean {
  * Uses Web Crypto API (Edge-compatible).
  * VULN-005 FIX: Uses separate SESSION_SECRET + server-side session validation.
  */
-async function isValidSession(token: string): Promise<boolean> {
+async function isValidSession(token: string): Promise<string | false> {
   const secret = getSessionSecret();
   if (!secret) return false;
 
   const parts = token.split(".");
   if (parts.length !== 2) return false;
 
-  const [timestamp, signature] = parts;
+  const [payload, signature] = parts;
+  const payloadParts = payload.split(":");
+  if (payloadParts.length !== 2) return false;
+
+  const [userId, timestamp] = payloadParts;
   const ts = parseInt(timestamp, 10);
 
   // Check token age
@@ -111,22 +115,19 @@ async function isValidSession(token: string): Promise<boolean> {
     false,
     ["sign"]
   );
-  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(timestamp));
+  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
   const expectedSignature = Array.from(new Uint8Array(sig))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 
-  // VULN-004 FIX: Use constant-time comparison
   if (!timingSafeCompare(signature, expectedSignature)) {
     return false;
   }
 
-  return true;
+  return userId;
 }
-
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-
   // ── Ban check for login-related routes ──
   if (pathname === "/login" || pathname === "/api/auth/login") {
     const ip =
@@ -157,11 +158,18 @@ export async function proxy(request: NextRequest) {
   // VULN-003 FIX: Removed /api/cron (now requires auth)
   if (
     pathname.startsWith("/api/collect") ||
-    pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/api/auth/login") ||
+    pathname.startsWith("/api/auth/register") ||
+    pathname.startsWith("/api/auth/logout") ||
+    pathname.startsWith("/api/auth/forgot-password") ||
+    pathname.startsWith("/api/auth/reset-password") ||
     pathname.startsWith("/api/config") ||
     pathname.startsWith("/api/public") ||
     pathname.startsWith("/api/v1") ||
     pathname === "/login" ||
+    pathname === "/register" ||
+    pathname.startsWith("/forgot-password") ||
+    pathname.startsWith("/reset-password") ||
     pathname === "/" ||
     pathname.startsWith("/share") ||
     pathname.startsWith("/t.js") ||
@@ -177,13 +185,15 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/api/dashboard") ||
     pathname.startsWith("/api/sites") ||
     pathname.startsWith("/api/debug") ||
-    pathname.startsWith("/api/cron");
+    pathname.startsWith("/api/cron") ||
+    pathname === "/api/auth/me";
   const isProtectedPage = pathname.startsWith("/dashboard");
 
   if (isProtectedApi || isProtectedPage) {
     const sessionCookie = request.cookies.get(COOKIE_NAME);
+    const userId = sessionCookie ? await isValidSession(sessionCookie.value) : false;
 
-    if (!sessionCookie || !(await isValidSession(sessionCookie.value))) {
+    if (!sessionCookie || !userId) {
       // API routes: return 401 JSON
       if (isProtectedApi) {
         return NextResponse.json(
@@ -234,6 +244,15 @@ export async function proxy(request: NextRequest) {
         );
       }
     }
+
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-user-id", userId);
+
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    });
   }
 
   return NextResponse.next();

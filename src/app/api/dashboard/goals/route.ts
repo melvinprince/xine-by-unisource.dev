@@ -1,18 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { goals, goalConversions, sessions } from "@/lib/db/schema";
-import { eq, and, gte, lte, sql } from "drizzle-orm";
-import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse } from "@/lib/api-helpers";
+import { eq, and, gte, lte, sql, inArray } from "drizzle-orm";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, getUserFromRequest, getUserAccessibleSiteIds } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get("siteId") || "all";
   const fromStr = searchParams.get("from");
   const toStr = searchParams.get("to");
 
   // 1. Verify Site UUID exists in database (or is "all")
-  const exists = await verifySiteExists(siteId);
+  const exists = await verifySiteExists(siteId, request);
   if (!exists) return siteNotFoundResponse();
+
+  const accessibleSites = siteId === "all" ? await getUserAccessibleSiteIds(userId) : [siteId];
 
   // 2. Safely parse and validate date range
   const dateRange = parseDateRange(fromStr, toStr);
@@ -27,7 +31,7 @@ export async function GET(request: NextRequest) {
       .from(sessions)
       .where(
         and(
-          siteId === "all" ? undefined : eq(sessions.site_id, siteId),
+          inArray(sessions.site_id, accessibleSites),
           gte(sessions.started_at, from),
           lte(sessions.started_at, to)
         )
@@ -35,9 +39,9 @@ export async function GET(request: NextRequest) {
     const totalSessions = sessionRes[0].count || 1; // avoid div/0
 
     // 2. Get all goals for the site
-    const siteGoals = siteId === "all"
-      ? await db.select().from(goals)
-      : await db.select().from(goals).where(eq(goals.site_id, siteId));
+    const siteGoals = accessibleSites.length > 0
+      ? await db.select().from(goals).where(inArray(goals.site_id, accessibleSites))
+      : [];
 
     // 3. Get conversions grouped by goal in range
     const conversionsRes = await db
@@ -48,7 +52,7 @@ export async function GET(request: NextRequest) {
       .from(goalConversions)
       .where(
         and(
-          siteId === "all" ? undefined : eq(goalConversions.site_id, siteId),
+          inArray(goalConversions.site_id, accessibleSites),
           gte(goalConversions.created_at, from),
           lte(goalConversions.created_at, to)
         )

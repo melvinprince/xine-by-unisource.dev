@@ -36,6 +36,20 @@
       "when": 1779991456303,
       "tag": "0004_luxuriant_gambit",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783162175833,
+      "tag": "0005_cold_prowler",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783312433257,
+      "tag": "0006_pretty_dust",
+      "breakpoints": true
     }
   ]
 }

@@ -1,29 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { emailReports, sites } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { validateOrThrow, createReportSchema, siteIdSchema, ValidationError } from "@/lib/validation";
+import { getUserFromRequest, getUserAccessibleSiteIds, verifyUserSiteAccess } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const rawSiteId = searchParams.get("siteId");
-
+    
     if (!rawSiteId) return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
 
     const siteId = validateOrThrow(siteIdSchema, rawSiteId);
 
     if (siteId !== "all") {
-      const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
-      if (!site) return NextResponse.json({ error: "Site not found" }, { status: 404 });
+      const hasAccess = await verifyUserSiteAccess(userId, siteId);
+      if (!hasAccess) return NextResponse.json({ error: "Site not found" }, { status: 404 });
     }
 
-    const reportsQuery = siteId === "all"
-      ? db.select().from(emailReports)
-      : db.select().from(emailReports).where(eq(emailReports.site_id, siteId));
-      
-    const reports = await reportsQuery;
-    
+    const accessibleSites = siteId === "all" ? await getUserAccessibleSiteIds(userId) : [siteId];
+
+    const reports = accessibleSites.length > 0 
+      ? await db.select().from(emailReports).where(inArray(emailReports.site_id, accessibleSites))
+      : [];
+
     return NextResponse.json({ reports });
   } catch (error) {
     if (error instanceof ValidationError) {
@@ -35,12 +38,14 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const body = await request.json();
     const validated = validateOrThrow(createReportSchema, body);
 
-    const site = await db.query.sites.findFirst({ where: eq(sites.id, validated.siteId) });
-    if (!site) return NextResponse.json({ error: "Site not found" }, { status: 404 });
+    const hasAccess = await verifyUserSiteAccess(userId, validated.siteId);
+    if (!hasAccess) return NextResponse.json({ error: "Site not found" }, { status: 404 });
 
     const newReport = await db.insert(emailReports).values({
       site_id: validated.siteId,

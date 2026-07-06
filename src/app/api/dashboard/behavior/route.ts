@@ -7,10 +7,12 @@ import {
   getUserFlows,
   getPagesPerSessionDistribution,
 } from "@/lib/queries-advanced";
-import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, parseFilters } from "@/lib/api-helpers";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, parseFilters, getUserFromRequest, getUserAccessibleSiteIds } from "@/lib/api-helpers";
 import { filterStore } from "@/lib/filter-store";
 
 export async function GET(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const siteId = searchParams.get("siteId") || "all";
@@ -18,8 +20,10 @@ export async function GET(request: NextRequest) {
     const to = searchParams.get("to");
 
     // 1. Verify Site UUID exists in database (or is "all")
-    const exists = await verifySiteExists(siteId);
-    if (!exists) return siteNotFoundResponse();
+    const exists = await verifySiteExists(siteId, request);
+  if (!exists) return siteNotFoundResponse();
+
+  const targetSiteId = siteId === "all" ? await getUserAccessibleSiteIds(userId) : siteId;
 
     // 2. Safely parse and validate date range
     const dateRange = parseDateRange(from, to);
@@ -30,12 +34,12 @@ export async function GET(request: NextRequest) {
     const data = await filterStore.run(filters, async () => {
       const [entryPages, exitPages, exitRates, scrollDepth, userFlows, pagesPerSession] =
         await Promise.all([
-          getEntryPages(siteId, dateRange),
-          getExitPages(siteId, dateRange),
-          getPageExitRates(siteId, dateRange),
-          getScrollDepthAnalysis(siteId, dateRange),
-          getUserFlows(siteId, dateRange),
-          getPagesPerSessionDistribution(siteId, dateRange),
+          getEntryPages(targetSiteId, dateRange),
+          getExitPages(targetSiteId, dateRange),
+          getPageExitRates(targetSiteId, dateRange),
+          getScrollDepthAnalysis(targetSiteId, dateRange),
+          getUserFlows(targetSiteId, dateRange),
+          getPagesPerSessionDistribution(targetSiteId, dateRange),
         ]);
 
       return {

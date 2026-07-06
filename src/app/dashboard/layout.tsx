@@ -12,6 +12,7 @@ import {
   initialFilters,
 } from '@/components/DashboardContext';
 import { useSites } from '@/hooks/use-sites';
+import { useUser } from '@/hooks/use-user';
 
 export default function DashboardLayout({
   children,
@@ -22,6 +23,7 @@ export default function DashboardLayout({
   const [dateRange, setDateRange] = useState<DateRangeState>(getDefaultDateRange);
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>(initialFilters);
   const { sites, loading: sitesLoading, refetch: refetchSites } = useSites();
+  const { user, loading: userLoading } = useUser();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const handleSiteChange = useCallback((siteId: string) => {
@@ -58,6 +60,8 @@ export default function DashboardLayout({
         sites,
         sitesLoading,
         refetchSites,
+        user,
+        userLoading,
         activeFilters,
         setActiveFilters,
         toggleFilter,

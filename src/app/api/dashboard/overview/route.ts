@@ -18,18 +18,22 @@ import {
  * Aggregates all dashboard overview data into a single response.
  * Query params: ?siteId=all&from=2026-01-01&to=2026-03-09
  */
-import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, parseFilters } from "@/lib/api-helpers";
+import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, parseFilters, getUserFromRequest, getUserAccessibleSiteIds } from "@/lib/api-helpers";
 import { filterStore } from "@/lib/filter-store";
 
 export async function GET(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get("siteId") || "all";
   const fromStr = searchParams.get("from");
   const toStr = searchParams.get("to");
 
   // 1. Verify Site UUID exists in database (or is "all")
-  const exists = await verifySiteExists(siteId);
+  const exists = await verifySiteExists(siteId, request);
   if (!exists) return siteNotFoundResponse();
+
+  const targetSiteId = siteId === "all" ? await getUserAccessibleSiteIds(userId) : siteId;
 
   // 2. Safely parse and validate date range
   const dateRange = parseDateRange(fromStr, toStr);
@@ -50,13 +54,13 @@ export async function GET(request: NextRequest) {
         countryStats,
         siteAnnotations,
       ] = await Promise.all([
-        getOverviewStats(siteId, dateRange, filters),
-        getVisitorTimeseries(siteId, dateRange, filters),
-        getTopPages(siteId, dateRange, 10, filters),
-        getTopSources(siteId, dateRange, 10, filters),
-        getDeviceBreakdown(siteId, dateRange, filters),
-        getBrowserBreakdown(siteId, dateRange, 8, filters),
-        getCountryBreakdown(siteId, dateRange, 10, filters),
+        getOverviewStats(targetSiteId, dateRange, filters),
+        getVisitorTimeseries(targetSiteId, dateRange, filters),
+        getTopPages(targetSiteId, dateRange, 10, filters),
+        getTopSources(targetSiteId, dateRange, 10, filters),
+        getDeviceBreakdown(targetSiteId, dateRange, filters),
+        getBrowserBreakdown(targetSiteId, dateRange, 8, filters),
+        getCountryBreakdown(targetSiteId, dateRange, 10, filters),
         siteId === "all" ? Promise.resolve([]) : db.select().from(annotations).where(
           and(
             eq(annotations.site_id, siteId),

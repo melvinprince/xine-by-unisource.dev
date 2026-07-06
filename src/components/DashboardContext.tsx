@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
-import type { Site } from '@/lib/types';
+import type { Site, User } from '@/lib/types';
 
 export interface ActiveFilters {
   countries: string[];
@@ -25,6 +25,8 @@ interface DashboardContextValue {
   sites: Site[];
   sitesLoading: boolean;
   refetchSites: () => void;
+  user: User | null;
+  userLoading: boolean;
   activeFilters: ActiveFilters;
   setActiveFilters: (filters: ActiveFilters) => void;
   toggleFilter: (dimension: keyof ActiveFilters, value: string) => void;
@@ -62,6 +64,8 @@ export const DashboardContext = createContext<DashboardContextValue>({
   sites: [],
   sitesLoading: true,
   refetchSites: () => {},
+  user: null,
+  userLoading: true,
   activeFilters: initialFilters,
   setActiveFilters: () => {},
   toggleFilter: () => {},

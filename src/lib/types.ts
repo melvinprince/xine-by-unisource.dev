@@ -3,13 +3,35 @@
 // Shared types used across the data layer, API routes, and UI.
 // ============================================================
 
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: "admin" | "user";
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface UserSiteAccess {
+  id: string;
+  user_id: string;
+  site_id: string;
+  role: "owner" | "editor" | "viewer";
+  granted_at: string;
+  // Joined fields:
+  user_email?: string;
+  user_name?: string;
+  site_name?: string;
+}
+
 /** A tracked website */
 export interface Site {
   id: string;
   name: string;
   domain: string;
   api_key: string;
-  user_id: string;
+  owner_id: string | null;
+  user_id?: string; // Legacy
   is_public: boolean | null;
   api_access_enabled: boolean | null;
   server_api_key: string;

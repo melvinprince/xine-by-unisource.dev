@@ -50,7 +50,7 @@ function countryFlag(code: string): string {
 }
 
 export function buildFilters(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   table: typeof pageviews | typeof events,
   filters?: DimensionFilters
@@ -59,7 +59,14 @@ export function buildFilters(
     gte(table.created_at, dateRange.from),
     lte(table.created_at, dateRange.to),
   ];
-  if (siteId !== "all") {
+  
+  if (Array.isArray(siteId)) {
+    if (siteId.length > 0) {
+      conditions.push(inArray(table.site_id, siteId));
+    } else {
+      conditions.push(sql`1 = 0`); // Force no results
+    }
+  } else if (siteId !== "all") {
     conditions.push(eq(table.site_id, siteId));
   }
   // Exclude bot traffic from all dashboard metrics
@@ -119,7 +126,7 @@ export function buildFilters(
  * with comparison to the previous period of the same length.
  */
 export async function getOverviewStats(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   filters?: DimensionFilters
 ): Promise<OverviewStats> {
@@ -185,7 +192,7 @@ export async function getOverviewStats(
  * Get visitor + pageview timeseries for charting.
  */
 export async function getVisitorTimeseries(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   filters?: DimensionFilters
 ): Promise<TimeseriesPoint[]> {
@@ -209,7 +216,7 @@ export async function getVisitorTimeseries(
  * Get top pages by view count.
  */
 export async function getTopPages(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 10,
   filters?: DimensionFilters
@@ -233,7 +240,7 @@ export async function getTopPages(
     views: r.views,
     uniqueVisitors: r.uniqueVisitors,
     avgDuration: r.avgDuration,
-    siteIds: siteId === "all" ? r.siteIds : undefined,
+    siteIds: Array.isArray(siteId) || siteId === "all" ? r.siteIds : undefined,
   }));
 }
 
@@ -241,7 +248,7 @@ export async function getTopPages(
  * Get top referrer sources.
  */
 export async function getTopSources(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 10,
   filters?: DimensionFilters
@@ -281,7 +288,7 @@ export async function getTopSources(
     referrer: r.source,
     visitors: r.visitors,
     percentage: total > 0 ? Math.round((r.visitors / total) * 100) : 0,
-    siteIds: siteId === "all" ? r.siteIds : undefined,
+    siteIds: Array.isArray(siteId) || siteId === "all" ? r.siteIds : undefined,
   }));
 }
 
@@ -289,7 +296,7 @@ export async function getTopSources(
  * Get device type breakdown (desktop/mobile/tablet).
  */
 export async function getDeviceBreakdown(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   filters?: DimensionFilters
 ): Promise<DeviceBreakdown> {
@@ -319,7 +326,7 @@ export async function getDeviceBreakdown(
  * Get browser usage breakdown.
  */
 export async function getBrowserBreakdown(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 8,
   filters?: DimensionFilters
@@ -342,7 +349,7 @@ export async function getBrowserBreakdown(
  * Get country visitor breakdown.
  */
 export async function getCountryBreakdown(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 10,
   filters?: DimensionFilters
@@ -370,7 +377,7 @@ export async function getCountryBreakdown(
  * Get top custom events.
  */
 export async function getTopEvents(
-  siteId: string | "all",
+  siteId: string | string[],
   dateRange: DateRange,
   limit = 10,
   filters?: DimensionFilters

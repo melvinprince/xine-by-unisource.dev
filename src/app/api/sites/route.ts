@@ -1,20 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { sites } from "@/lib/db/schema";
-import { desc } from "drizzle-orm";
+import { sites, userSites } from "@/lib/db/schema";
+import { desc, inArray, eq } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 import { validateOrThrow, createSiteSchema, ValidationError } from "@/lib/validation";
+import { getUserFromRequest, getUserAccessibleSiteIds } from "@/lib/api-helpers";
 
 /**
  * GET /api/sites — List all tracked sites.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   try {
-    // Now protected by proxy.ts auth — safe to return all fields
+    const accessibleSites = await getUserAccessibleSiteIds(userId);
+    if (accessibleSites.length === 0) {
+      return NextResponse.json([]);
+    }
+
     const data = await db
       .select()
       .from(sites)
+      .where(inArray(sites.id, accessibleSites))
       .orderBy(desc(sites.created_at));
 
     return NextResponse.json(
@@ -39,6 +48,9 @@ export async function GET() {
  * Auto-generates a unique API key.
  */
 export async function POST(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  
   try {
     const body = await request.json();
     const validated = validateOrThrow(createSiteSchema, body);
@@ -52,16 +64,27 @@ export async function POST(request: NextRequest) {
     // Auto-generate API key
     const apiKey = randomUUID();
 
-    const result = await db
-      .insert(sites)
-      .values({
-        name,
-        domain: cleanDomain,
-        api_key: apiKey,
-        user_id: 'admin',
-        server_api_key: randomUUID(),
-      })
-      .returning();
+    const result = await db.transaction(async (tx) => {
+      const siteRes = await tx
+        .insert(sites)
+        .values({
+          name,
+          domain: cleanDomain,
+          api_key: apiKey,
+          server_api_key: randomUUID(),
+          owner_id: userId,
+          user_id: userId,
+        })
+        .returning();
+
+      await tx.insert(userSites).values({
+        user_id: userId,
+        site_id: siteRes[0].id,
+        role: "owner",
+      });
+
+      return siteRes;
+    });
 
     return NextResponse.json(
       {

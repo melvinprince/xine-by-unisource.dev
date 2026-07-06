@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { alerts, sites } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { validateOrThrow, createAlertSchema, uuidSchema, siteIdSchema, ValidationError } from "@/lib/validation";
+import { getUserFromRequest, getUserAccessibleSiteIds, verifyUserSiteAccess } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const rawSiteId = searchParams.get("siteId");
@@ -13,15 +16,15 @@ export async function GET(request: NextRequest) {
     const siteId = validateOrThrow(siteIdSchema, rawSiteId);
 
     if (siteId !== "all") {
-      const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
-      if (!site) return NextResponse.json({ error: "Site not found" }, { status: 404 });
+      const hasAccess = await verifyUserSiteAccess(userId, siteId);
+      if (!hasAccess) return NextResponse.json({ error: "Site not found" }, { status: 404 });
     }
 
-    const alertsQuery = siteId === "all"
-      ? db.select().from(alerts)
-      : db.select().from(alerts).where(eq(alerts.site_id, siteId));
-      
-    const siteAlerts = await alertsQuery;
+    const accessibleSites = siteId === "all" ? await getUserAccessibleSiteIds(userId) : [siteId];
+
+    const siteAlerts = accessibleSites.length > 0 
+      ? await db.select().from(alerts).where(inArray(alerts.site_id, accessibleSites))
+      : [];
     
     return NextResponse.json({ alerts: siteAlerts });
   } catch (error) {
@@ -34,12 +37,14 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const userId = getUserFromRequest(request);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const body = await request.json();
     const validated = validateOrThrow(createAlertSchema, body);
 
-    const site = await db.query.sites.findFirst({ where: eq(sites.id, validated.siteId) });
-    if (!site) return NextResponse.json({ error: "Site not found" }, { status: 404 });
+    const hasAccess = await verifyUserSiteAccess(userId, validated.siteId);
+    if (!hasAccess) return NextResponse.json({ error: "Site not found" }, { status: 404 });
 
     const newAlert = await db.insert(alerts).values({
       site_id: validated.siteId,
