@@ -21,6 +21,7 @@ interface VisitorChartProps {
   title?: React.ReactNode;
   primaryDataKey?: string;
   primaryLabel?: string;
+  onDateClick?: (date: string) => void;
 }
 
 interface CustomTooltipProps {
@@ -110,6 +111,7 @@ export default function VisitorChart({
   title = "Visitor Trend",
   primaryDataKey = "visitors",
   primaryLabel = "Visitors",
+  onDateClick,
 }: VisitorChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -135,6 +137,12 @@ export default function VisitorChart({
           <AreaChart
             data={data}
             margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
+            onClick={(e) => {
+              if (e && e.activePayload && e.activePayload.length > 0 && onDateClick) {
+                onDateClick(e.activePayload[0].payload.date);
+              }
+            }}
+            style={{ cursor: onDateClick ? 'pointer' : 'default' }}
           >
             <defs>
               <linearGradient id="colorVisitors" x1="0" y1="0" x2="0" y2="1">

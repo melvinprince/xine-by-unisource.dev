@@ -6,6 +6,7 @@ import { Calendar, ChevronDown } from 'lucide-react';
 
 interface DateRangePickerProps {
   onChange?: (range: { from: string; to: string; label: string }) => void;
+  value?: string;
 }
 
 const presets = [
@@ -48,9 +49,9 @@ function getDateRange(preset: typeof presets[0]) {
   };
 }
 
-export default function DateRangePicker({ onChange }: DateRangePickerProps) {
+export default function DateRangePicker({ onChange, value }: DateRangePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [selected, setSelected] = useState('Last 30 days');
+  const selected = value || 'Last 30 days';
   const dropdownRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -99,7 +100,6 @@ export default function DateRangePicker({ onChange }: DateRangePickerProps) {
   }, []);
 
   const selectPreset = (preset: (typeof presets)[0]) => {
-    setSelected(preset.label);
     const range = getDateRange(preset);
     onChange?.({ ...range, label: preset.label });
     closeMenu();

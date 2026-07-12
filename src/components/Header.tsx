@@ -11,6 +11,7 @@ interface HeaderProps {
   selectedSite: string;
   onSiteChange: (siteId: string) => void;
   onDateRangeChange?: (range: { from: string; to: string; label: string }) => void;
+  dateRangeLabel?: string;
 }
 
 /* Map route to page title */
@@ -38,6 +39,7 @@ export default function Header({
   selectedSite,
   onSiteChange,
   onDateRangeChange,
+  dateRangeLabel,
 }: HeaderProps) {
   const pathname = usePathname();
   const pageTitle = routeTitles[pathname] || 'Dashboard';
@@ -95,7 +97,7 @@ export default function Header({
             background: 'var(--color-border-subtle)',
           }}
         />
-        <DateRangePicker onChange={onDateRangeChange} />
+        <DateRangePicker onChange={onDateRangeChange} value={dateRangeLabel} />
       </div>
     </header>
   );

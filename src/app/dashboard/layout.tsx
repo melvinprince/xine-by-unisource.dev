@@ -94,6 +94,7 @@ export default function DashboardLayout({
             selectedSite={selectedSite}
             onSiteChange={handleSiteChange}
             onDateRangeChange={setDateRange}
+            dateRangeLabel={dateRange.label}
           />
 
           {/* Active Filter Bar — only visible when filters are applied */}

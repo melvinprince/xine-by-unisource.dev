@@ -17,7 +17,7 @@ import { useDashboardData } from '@/hooks/use-dashboard-data';
 import { formatDuration } from '@/lib/utils';
 
 export default function DashboardPage() {
-  const { selectedSite, dateRange, activeFilters, toggleFilter, sites } = useDashboardContext();
+  const { selectedSite, dateRange, setDateRange, activeFilters, toggleFilter, sites } = useDashboardContext();
   const { data, loading, error, refetch } = useDashboardData(selectedSite, dateRange, activeFilters);
 
   const [hiddenWidgets, setHiddenWidgets] = useState<string[]>([]);
@@ -41,6 +41,13 @@ export default function DashboardPage() {
       : [...hiddenWidgets, id];
     setHiddenWidgets(newHidden);
     localStorage.setItem('dashboard_hidden_widgets', JSON.stringify(newHidden));
+  };
+
+  const handleDateClick = (dateStr: string) => {
+    const dayStr = dateStr.split('T')[0];
+    const dateObj = new Date(dayStr + 'T00:00:00Z');
+    const label = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    setDateRange({ from: dayStr, to: dayStr, label });
   };
 
   if (loading) return <LoadingState message="Loading analytics..." />;
@@ -172,7 +179,7 @@ export default function DashboardPage() {
 
       {/* ── Visitor Trend Chart ─────────────────────────────── */}
       {!hiddenWidgets.includes('trend') && (
-        <VisitorChart data={data.timeseries} annotations={data.annotations} />
+        <VisitorChart data={data.timeseries} annotations={data.annotations} onDateClick={handleDateClick} />
       )}
 
       {/* ── Two-Column: Top Pages + Top Sources ───────────── */}
