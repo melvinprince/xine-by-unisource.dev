@@ -137,7 +137,7 @@ export default function VisitorChart({
           <AreaChart
             data={data}
             margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
-            onClick={(e) => {
+            onClick={(e: any) => {
               if (e && e.activePayload && e.activePayload.length > 0 && onDateClick) {
                 onDateClick(e.activePayload[0].payload.date);
               }
