@@ -12,6 +12,7 @@ const presets = [
   { label: 'Last 1 hour', hours: 1 },
   { label: 'Last 3 hours', hours: 3 },
   { label: 'Last 12 hours', hours: 12 },
+  { label: 'Last 24 hours', hours: 24 },
   { label: 'Today', days: 0 },
   { label: 'Last 7 days', days: 7 },
   { label: 'Last 30 days', days: 30 },
