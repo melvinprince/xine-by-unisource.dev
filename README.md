@@ -54,6 +54,7 @@ Toggle features per-site to keep the tracking script minimal:
 - 📧 **Email reports** — daily, weekly, or monthly summaries
 - 🟢 **Uptime monitoring** — track site availability
 - 🔗 **Public dashboards** — shareable read-only views
+- 🤖 **MCP server** — connect Claude and other AI assistants to your analytics
 - 🌓 **Themes** — premium light and dark UI modes with smooth animations
 
 ## Tech Stack
@@ -196,6 +197,39 @@ wa.track("signup_click", { plan: "pro" });
 // Track a purchase
 wa.track("purchase", { value: 29.99, currency: "USD" });
 ```
+
+## MCP Server (AI Assistant Access)
+
+Xine ships with a built-in [MCP](https://modelcontextprotocol.io) server at `/api/mcp`, so AI assistants like Claude Code and Claude Desktop can query and manage your analytics in natural language — "How did traffic change after Tuesday's deploy?", "Create a signup conversion goal", "Which pages have the worst Web Vitals?".
+
+**31 tools** cover the full platform: traffic overviews, timeseries, breakdowns (pages, sources, campaigns, devices, browsers, countries, events…), realtime stats, engagement, behavior reports, Web Vitals, JS errors, SEO, plus full management of sites, goals, funnels, annotations, alerts, uptime, and email reports. Access is scoped to your account's site roles — viewers can read, editors can modify, owners can delete.
+
+### Connect an assistant
+
+1. In the dashboard go to **Settings → API Tokens (MCP)** and generate a token (shown once).
+2. Connect your MCP client:
+
+   ```bash
+   # Claude Code
+   claude mcp add --transport http xine https://YOUR_ANALYTICS_DOMAIN/api/mcp \
+     --header "Authorization: Bearer YOUR_TOKEN"
+   ```
+
+   Or for clients using JSON config (Claude Desktop, Cursor, etc.):
+
+   ```json
+   {
+     "mcpServers": {
+       "xine": {
+         "type": "http",
+         "url": "https://YOUR_ANALYTICS_DOMAIN/api/mcp",
+         "headers": { "Authorization": "Bearer YOUR_TOKEN" }
+       }
+     }
+   }
+   ```
+
+Tokens can be revoked anytime from the same settings screen. Treat them like passwords — anyone holding a token gets your dashboard access.
 
 ## Production Deployment
 

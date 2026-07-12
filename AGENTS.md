@@ -163,6 +163,7 @@ Dashboard user → Login → /dashboard/* → /api/dashboard/* → Drizzle queri
 - `proxy.ts` middleware validates the cookie on all `/dashboard/*` and `/api/dashboard/*` routes.
 - Uses Web Crypto API for Edge Runtime compatibility.
 - External API access uses a separate `server_api_key` per site (`/api/v1/*`).
+- **MCP server** at `/api/mcp` (`src/app/api/[transport]/route.ts`, built on `mcp-handler`): authenticated with per-user personal access tokens (`api_tokens` table, sha256-hashed, managed at `/api/dashboard/tokens` + Settings UI). Tool implementations live in `src/lib/mcp/` and enforce `userSites` roles (viewer/editor/owner).
 
 ---
 

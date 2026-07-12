@@ -16,6 +16,7 @@ import {
   ShieldOff,
 } from 'lucide-react';
 import IntegrationSnippet from '@/components/IntegrationSnippet';
+import ApiTokensSection from '@/components/ApiTokensSection';
 import { LoadingState } from '@/components/DataStates';
 import { useDashboardContext } from '@/components/DashboardContext';
 import PageHeader from '@/components/PageHeader';
@@ -317,6 +318,9 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
+
+      {/* ── API Tokens (MCP) ── */}
+      <ApiTokensSection />
 
       {/* ── Banned Logins Manager ── */}
       <BannedLoginsManager />

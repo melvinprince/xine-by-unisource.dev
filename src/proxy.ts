@@ -166,6 +166,8 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/api/config") ||
     pathname.startsWith("/api/public") ||
     pathname.startsWith("/api/v1") ||
+    pathname.startsWith("/api/mcp") || // MCP endpoint — bearer token auth handled in the route itself
+
     pathname === "/login" ||
     pathname === "/register" ||
     pathname.startsWith("/forgot-password") ||

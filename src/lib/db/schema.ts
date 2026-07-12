@@ -351,7 +351,29 @@ export const passwordResetOtps = pgTable("password_reset_otps", {
 ]);
 
 // ============================================================
-// 19. SITE INVITES
+// 19. API TOKENS (personal access tokens for MCP / external API)
+// ============================================================
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    user_id: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    token_hash: text("token_hash").notNull().unique(), // sha256 hex of the raw token
+    token_prefix: varchar("token_prefix", { length: 16 }).notNull(), // first chars shown in UI
+    last_used_at: timestamp("last_used_at", { withTimezone: true }),
+    expires_at: timestamp("expires_at", { withTimezone: true }),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_api_tokens_user_id").on(table.user_id),
+  ]
+);
+
+// ============================================================
+// 20. SITE INVITES
 // ============================================================
 export const siteInvites = pgTable(
   "site_invites",
