@@ -290,6 +290,23 @@ export interface RealtimeStats {
   topCountries: { country: string; flag: string; count: number }[];
 }
 
+/** How much traffic the bot filter flagged, and why. */
+export interface BotBreakdown {
+  humanPageviews: number;
+  botPageviews: number;
+  /** Bot share of all pageviews in range, 0-100. */
+  botPercentage: number;
+  reasons: {
+    /** Primary reason, e.g. "ua_crawler", "heuristic". */
+    reason: string;
+    count: number;
+    /** Mean bot_score in this bucket — useful for spotting borderline rules. */
+    avgScore: number;
+    /** Share of flagged traffic, 0-100. */
+    percentage: number;
+  }[];
+}
+
 /** Connection type distribution */
 export interface ConnectionTypeEntry {
   type: string;

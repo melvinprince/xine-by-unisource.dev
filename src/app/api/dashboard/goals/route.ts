@@ -25,13 +25,16 @@ export async function GET(request: NextRequest) {
   const { from, to } = dateRange;
 
   try {
-    // 1. Get total sessions in range for the site (for conversion rate)
+    // 1. Get total sessions in range for the site (for conversion rate).
+    //    Bot sessions are excluded: they never produce conversions, so
+    //    counting them here only deflates every goal's rate.
     const sessionRes = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(sessions)
       .where(
         and(
           inArray(sessions.site_id, accessibleSites),
+          eq(sessions.is_bot, false),
           gte(sessions.started_at, from),
           lte(sessions.started_at, to)
         )

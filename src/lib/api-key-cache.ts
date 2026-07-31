@@ -1,11 +1,16 @@
 /**
- * In-memory cache for API key → site_id lookups.
- * Avoids hitting Supabase on every /api/collect request.
+ * In-memory cache for API key → site lookups.
+ * Avoids hitting the database on every /api/collect request.
  * TTL: 5 minutes.
  */
 
-interface CacheEntry {
+export interface CachedSite {
   siteId: string;
+  /** Registered domain, used to verify request provenance. */
+  domain: string;
+}
+
+interface CacheEntry extends CachedSite {
   expiresAt: number;
 }
 
@@ -13,10 +18,11 @@ const TTL_MS = 5 * 60 * 1000; // 5 minutes
 const cache = new Map<string, CacheEntry>();
 
 /**
- * Get a cached site_id for an API key.
- * Returns the site_id if found and not expired, otherwise undefined.
+ * Get the cached site for an API key.
+ * Returns the entry if found and not expired, otherwise undefined.
+ * An entry with an empty `siteId` is a cached "invalid key" marker.
  */
-export function getCachedSiteId(apiKey: string): string | undefined {
+export function getCachedSite(apiKey: string): CachedSite | undefined {
   const entry = cache.get(apiKey);
   if (!entry) return undefined;
 
@@ -25,25 +31,27 @@ export function getCachedSiteId(apiKey: string): string | undefined {
     return undefined;
   }
 
-  return entry.siteId;
+  return { siteId: entry.siteId, domain: entry.domain };
 }
 
 /**
- * Store an API key → site_id mapping in cache.
+ * Store an API key → site mapping in cache.
  */
-export function setCachedSiteId(apiKey: string, siteId: string): void {
+export function setCachedSite(apiKey: string, siteId: string, domain: string): void {
   cache.set(apiKey, {
     siteId,
+    domain,
     expiresAt: Date.now() + TTL_MS,
   });
 }
 
 /**
- * Mark an API key as invalid (cache a null entry to avoid repeated lookups).
+ * Mark an API key as invalid (cache an empty entry to avoid repeated lookups).
  */
 export function setCachedInvalid(apiKey: string): void {
   cache.set(apiKey, {
     siteId: "",
+    domain: "",
     expiresAt: Date.now() + TTL_MS,
   });
 }

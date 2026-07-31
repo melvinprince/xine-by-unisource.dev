@@ -57,6 +57,13 @@
       "when": 1783840265117,
       "tag": "0007_absurd_mother_askani",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785447198845,
+      "tag": "0008_bot_audit_columns",
+      "breakpoints": true
     }
   ]
 }

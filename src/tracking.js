@@ -1,16 +1,22 @@
 (function () {
   "use strict";
 
-  // Comprehensive bot filter blocking Lighthouse, Googlebot, Ahrefs, headless browsers, and other crawlers
-  var isBot = /bot|googlebot|crawler|spider|robot|crawling|lighthouse|headless|phantomjs|chrome-lighthouse|yandex|bingbot|yahoo|duckduckbot|baiduspider|slurp|ahrefsbot|semrushbot|mj12bot|dotbot/i.test(navigator.userAgent) || navigator.webdriver;
+  // Bot hint, reported to the server rather than used to suppress the beacon.
+  // Suppressing here made bot volume invisible and therefore untunable; the
+  // server records the hint and flags the row instead.
+  //
+  // Word-boundary anchored on purpose: the previous unanchored /bot|.../ also
+  // matched real devices ("Cubot" phones) and real users ("yahoo" in the Yahoo
+  // app webview), silently dropping them.
+  var BOT_UA = /(^|[^a-z])(bot|googlebot|bingbot|yandexbot|duckduckbot|baiduspider|ahrefsbot|semrushbot|mj12bot|dotbot|crawler|spider|crawling|lighthouse|headlesschrome|phantomjs|slurp)([^a-z]|$)/i;
+  var botHint = BOT_UA.test(navigator.userAgent) || navigator.webdriver === true;
 
-  // Prevent tracking bots, data-saver mode, and prerendering
-  if (
-    isBot ||
-    (navigator.connection && navigator.connection.saveData) ||
-    document.visibilityState === "prerender" ||
-    window.location.search.indexOf("no_track=1") !== -1
-  ) {
+  // Opt-out only. Note what is deliberately NOT excluded here:
+  //   - navigator.connection.saveData: data-saver users are real people.
+  //   - prerender: handled properly below via document.prerendering rather
+  //     than the long-obsolete "prerender" visibilityState, which modern
+  //     Chrome speculation-rules prerendering never produces.
+  if (window.location.search.indexOf("no_track=1") !== -1) {
     return;
   }
 
@@ -63,25 +69,37 @@
     var currentUrl = "";
     var pageLoadTime = Date.now();
 
-    var isBlocked = false;
+    function postJson(dataStr) {
+      return fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: dataStr,
+        keepalive: true
+      });
+    }
 
+    // No permanent "blocked" latch here. sendBeacon returns false for a
+    // transient condition (the user agent's queue is full), and latching on
+    // that used to discard every later beacon on the page — which showed up
+    // as pageviews with duration 0 and an inflated bounce rate. Fall back to
+    // fetch instead and let individual sends fail on their own.
     function sendPayload(payload) {
-      if (isBlocked) return;
-      var dataStr = JSON.stringify(payload);
+      var dataStr;
+      // Report our in-page bot verdict so the server can flag the row.
+      if (botHint && payload.data) payload.data.bot_hint = 1;
+      try {
+        dataStr = JSON.stringify(payload);
+      } catch (e) {
+        return;
+      }
       try {
         if (navigator.sendBeacon) {
           var sent = navigator.sendBeacon(endpoint, new Blob([dataStr], { type: "application/json" }));
-          if (!sent) isBlocked = true;
-        } else {
-          fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: dataStr,
-            keepalive: true
-          }).catch(function () { isBlocked = true; });
+          if (sent) return;
         }
+        postJson(dataStr).catch(function () {});
       } catch (e) {
-        isBlocked = true;
+        try { postJson(dataStr).catch(function () {}); } catch (e2) {}
       }
     }
 
@@ -439,14 +457,29 @@
 
 
       })
-      .catch(function() { isBlocked = true; }); // If config blocked, stop all tracking
+      // Optional-feature config only. A failure here (ad-blocker, transient
+      // network error) must NOT stop core pageview/duration tracking — that
+      // previously latched isBlocked and cost every duration beacon on the
+      // page, inflating bounce rate.
+      .catch(function () {});
 
   };
 
-  if (window.requestIdleCallback) {
-    window.requestIdleCallback(run);
+  function schedule() {
+    if (window.requestIdleCallback) {
+      window.requestIdleCallback(run);
+    } else {
+      setTimeout(run, 150);
+    }
+  }
+
+  // Defer until a prerendered page is actually activated, so speculation-rules
+  // prerenders are not counted as visits. If the prerender is never activated,
+  // nothing is ever sent — which is the correct outcome.
+  if (document.prerendering) {
+    document.addEventListener("prerenderingchange", schedule, { once: true });
   } else {
-    setTimeout(run, 150);
+    schedule();
   }
 
 })();

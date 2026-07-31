@@ -4,10 +4,15 @@ import { sites, pageviews, events, sessions, goalConversions } from "@/lib/db/sc
 import { eq, and, desc, sql } from "drizzle-orm";
 import { getCachedGoals } from "@/lib/goals-cache";
 import { createHash, randomUUID } from "crypto";
-import { isbot } from "isbot";
 import {
-  getCachedSiteId,
-  setCachedSiteId,
+  detectBot,
+  encodeBotReason,
+  type BotVerdict,
+} from "@/lib/bot-detection";
+import { getClientIp } from "@/lib/client-ip";
+import {
+  getCachedSite,
+  setCachedSite,
   setCachedInvalid,
 } from "@/lib/api-key-cache";
 
@@ -37,30 +42,68 @@ function hashIp(ip: string): string {
     .slice(0, 16);
 }
 
-function getClientIp(request: NextRequest): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    request.headers.get("cf-connecting-ip") ||
-    ""
-  );
+/**
+ * Cookieless visitor identity: IP + User-Agent + daily salt.
+ *
+ * The User-Agent is part of the hash because IP alone collapses everyone
+ * behind a NAT (CGNAT, offices, schools, mobile carriers) into a single
+ * "visitor" whose sessions then merge into one. Including the UA separates
+ * distinct devices/browsers sharing an egress IP, which is the dominant
+ * source of visitor undercounting.
+ */
+function computeVisitorId(ip: string, userAgent: string): string {
+  if (!ip && !userAgent) return "";
+  return createHash("sha256")
+    .update(ip + "|" + userAgent + "|" + getDailySalt())
+    .digest("hex")
+    .slice(0, 16);
 }
 
-// ---- Simple In-Memory Rate Limiter ----
+// ---- Request-rate ceilings (per client IP, 1-minute fixed window) ----
+//
+// Two tiers, because the old single 100/min ceiling silently deleted real
+// people: a NAT'd office shares one IP, and each pageview legitimately emits
+// a pageview beacon plus up to three heartbeats plus unload durations plus
+// scroll/click events.
+//
+//  - SOFT: adds a weighted signal only. On its own it can never flag a
+//    visitor; it has to coincide with other anomalies.
+//  - HARD: the one and only place this endpoint discards data. It is a
+//    database-protection backstop, not a bot judgement, and is set far above
+//    anything a shared egress IP produces for one site (10k/min is ~167 req/s
+//    from a single address). Real edge rate limiting belongs in nginx/CDN.
+const SOFT_RATE_LIMIT = Math.max(
+  1,
+  parseInt(process.env.COLLECT_SOFT_RATE_LIMIT || "300", 10) || 300
+);
+const HARD_RATE_LIMIT = Math.max(
+  SOFT_RATE_LIMIT,
+  parseInt(process.env.COLLECT_HARD_RATE_LIMIT || "10000", 10) || 10000
+);
+const RATE_WINDOW_MS = 60_000;
+
 const rateLimitMap = new Map<string, { count: number; expiresAt: number }>();
 
-function isRateLimited(key: string): boolean {
-  if (!key) return false;
+interface RateVerdict {
+  overSoft: boolean;
+  overHard: boolean;
+}
+
+function checkRate(key: string): RateVerdict {
+  if (!key) return { overSoft: false, overHard: false };
   const now = Date.now();
   const record = rateLimitMap.get(key);
-  
+
   if (!record || record.expiresAt < now) {
-    rateLimitMap.set(key, { count: 1, expiresAt: now + 60000 }); // 1 minute window
-    return false;
+    rateLimitMap.set(key, { count: 1, expiresAt: now + RATE_WINDOW_MS });
+    return { overSoft: false, overHard: false };
   }
-  
+
   record.count += 1;
-  return record.count > 100; // >100 requests per minute per IP/Session is likely a bot
+  return {
+    overSoft: record.count > SOFT_RATE_LIMIT,
+    overHard: record.count > HARD_RATE_LIMIT,
+  };
 }
 
 // Clean up rate limit map every 5 minutes
@@ -72,20 +115,6 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000);
-
-// ---- Referrer Spam Blocklist ----
-const SPAM_REFERRER_KEYWORDS = [
-  "traffic", "seo", "rank", "buy", "cheap", "cryptocloud", 
-  "free", "money", "earn", "click", "casino", "porn"
-];
-
-function isSpamReferrer(referrer: string): boolean {
-  if (!referrer) return false;
-  const lower = referrer.toLowerCase();
-  // Always permit major search engines
-  if (lower.includes("google.") || lower.includes("bing.") || lower.includes("yahoo.")) return false;
-  return SPAM_REFERRER_KEYWORDS.some(kw => lower.includes(kw));
-}
 
 // VULN-009 FIX: Input sanitization helpers
 const MAX_STRING_LENGTH = 2048; // Max length for any single field
@@ -141,8 +170,8 @@ async function upsertSession(
   data: Record<string, unknown>,
   country: string,
   city: string,
-  isBot: boolean,
-  ipHash: string
+  verdict: BotVerdict,
+  visitorId: string
 ): Promise<void> {
   const sessionId = (data.session_id as string) || "";
   const url = (data.url as string) || "";
@@ -156,7 +185,7 @@ async function upsertSession(
       .values({
         id: sessionId,
         site_id: siteId,
-        visitor_id: ipHash,
+        visitor_id: visitorId,
         entry_page: url,
         exit_page: url,
         page_count: 1,
@@ -173,7 +202,9 @@ async function upsertSession(
         screen: (data.screen as string) || "",
         timezone: (data.timezone as string) || "",
         connection_type: (data.connection_type as string) || "",
-        is_bot: isBot,
+        is_bot: verdict.isBot,
+        bot_reason: encodeBotReason(verdict),
+        bot_score: verdict.score,
         is_bounce: true,
         started_at: now,
         ended_at: now,
@@ -192,12 +223,21 @@ async function upsertSession(
   }
 }
 
+/**
+ * Reuse an in-flight session for the same visitor, or fall back to the
+ * client-supplied id.
+ *
+ * Scoped by is_bot so a crawler sharing an egress IP with a real person can
+ * never be stitched into that person's session (which would flip is_bounce
+ * and inflate page_count on otherwise clean data).
+ */
 async function resolveSessionId(
   siteId: string,
-  ipHash: string,
-  clientSessionId: string
+  visitorId: string,
+  clientSessionId: string,
+  isBot: boolean
 ): Promise<string> {
-  if (!ipHash) return clientSessionId || randomUUID();
+  if (!visitorId) return clientSessionId || randomUUID();
   const now = new Date();
   const thirtyMinsAgo = new Date(now.getTime() - 30 * 60 * 1000);
   try {
@@ -207,7 +247,8 @@ async function resolveSessionId(
       .where(
         and(
           eq(sessions.site_id, siteId),
-          eq(sessions.visitor_id, ipHash),
+          eq(sessions.visitor_id, visitorId),
+          eq(sessions.is_bot, isBot),
           sql`${sessions.ended_at} >= ${thirtyMinsAgo}`
         )
       )
@@ -233,10 +274,19 @@ async function processPayload(
   country: string,
   city: string,
   ipHash: string,
-  isBot: boolean
+  visitorId: string,
+  verdict: BotVerdict
 ): Promise<void> {
+  const isBot = verdict.isBot;
+  const botReason = encodeBotReason(verdict);
+
   // Resolve active session server-side to avoid cookie/localStorage consent requirements
-  const sessionId = await resolveSessionId(siteId, ipHash, (data.session_id as string) || "");
+  const sessionId = await resolveSessionId(
+    siteId,
+    visitorId,
+    (data.session_id as string) || "",
+    isBot
+  );
   data.session_id = sessionId;
 
   try {
@@ -252,7 +302,7 @@ async function processPayload(
           utm_source: sanitizeString(data.utm_source, 256),
           utm_medium: sanitizeString(data.utm_medium, 256),
           utm_campaign: sanitizeString(data.utm_campaign, 256),
-          visitor_id: ipHash, // Forced backend IP hash for cookieless GDPR compliance
+          visitor_id: visitorId, // Cookieless: salted hash of IP + User-Agent
           session_id: sanitizeString(data.session_id, 128),
           country,
           city,
@@ -267,35 +317,41 @@ async function processPayload(
           connection_type: sanitizeString(data.connection_type, 32) || null,
           ttfb: typeof data.ttfb === "number" ? Math.min(Math.max(data.ttfb, 0), 60000) : null,
           is_bot: isBot,
+          bot_reason: botReason,
+          bot_score: verdict.score,
         });
 
         // Upsert session (fire-and-forget within fire-and-forget)
-        upsertSession(siteId, data, country, city, isBot, ipHash);
+        upsertSession(siteId, data, country, city, verdict, visitorId);
 
-        // Evaluate Pageview Goals
-        try {
-          const siteGoals = await getCachedGoals(siteId);
-          const pvGoals = siteGoals.filter((g) => g.type === "pageview");
-          const currentUrl = (data.url as string) || "";
-          
-          for (const goal of pvGoals) {
-            let matched = false;
-            const target = goal.target;
-            if (goal.condition === "equals" && currentUrl === target) matched = true;
-            else if (goal.condition === "contains" && currentUrl.includes(target)) matched = true;
-            else if (goal.condition === "starts_with" && currentUrl.startsWith(target)) matched = true;
-            
-            if (matched && data.session_id && data.visitor_id) {
-              await db.insert(goalConversions).values({
-                goal_id: goal.id,
-                site_id: siteId,
-                session_id: data.session_id as string,
-                visitor_id: ipHash,
-              }).onConflictDoNothing(); // prevent duplicate insert errors if any
+        // Evaluate Pageview Goals.
+        // goal_conversions has no is_bot column, so bot traffic is skipped
+        // outright rather than polluting conversion counts.
+        if (!isBot) {
+          try {
+            const siteGoals = await getCachedGoals(siteId);
+            const pvGoals = siteGoals.filter((g) => g.type === "pageview");
+            const currentUrl = (data.url as string) || "";
+
+            for (const goal of pvGoals) {
+              let matched = false;
+              const target = goal.target;
+              if (goal.condition === "equals" && currentUrl === target) matched = true;
+              else if (goal.condition === "contains" && currentUrl.includes(target)) matched = true;
+              else if (goal.condition === "starts_with" && currentUrl.startsWith(target)) matched = true;
+
+              if (matched && sessionId && visitorId) {
+                await db.insert(goalConversions).values({
+                  goal_id: goal.id,
+                  site_id: siteId,
+                  session_id: sessionId,
+                  visitor_id: visitorId,
+                }).onConflictDoNothing(); // prevent duplicate insert errors if any
+              }
             }
+          } catch (err) {
+            console.error("[collect] Goal checking error:", err);
           }
-        } catch (err) {
-          console.error("[collect] Goal checking error:", err);
         }
 
         break;
@@ -310,40 +366,46 @@ async function processPayload(
           site_id: siteId,
           name: sanitizeString(data.name, 256) || "unknown",
           properties: safeProps,
-          visitor_id: ipHash,
+          visitor_id: visitorId,
           session_id: sanitizeString(data.session_id, 128),
           url: sanitizeUrl(data.url),
           is_bot: isBot,
+          bot_reason: botReason,
+          bot_score: verdict.score,
         });
 
-        // Evaluate Event Goals
-        try {
-          const siteGoals = await getCachedGoals(siteId);
-          const eventGoals = siteGoals.filter((g) => g.type === "event");
-          const eventName = (data.name as string) || "unknown";
-          
-          for (const goal of eventGoals) {
-            let matched = false;
-            const target = goal.target;
-            if (goal.condition === "equals" && eventName === target) matched = true;
-            else if (goal.condition === "contains" && eventName.includes(target)) matched = true;
-            else if (goal.condition === "starts_with" && eventName.startsWith(target)) matched = true;
-            
-            if (matched && data.session_id && data.visitor_id) {
-              await db.insert(goalConversions).values({
-                goal_id: goal.id,
-                site_id: siteId,
-                session_id: data.session_id as string,
-                visitor_id: ipHash,
-              });
+        // Evaluate Event Goals (human traffic only — see pageview case)
+        if (!isBot) {
+          try {
+            const siteGoals = await getCachedGoals(siteId);
+            const eventGoals = siteGoals.filter((g) => g.type === "event");
+            const eventName = (data.name as string) || "unknown";
+
+            for (const goal of eventGoals) {
+              let matched = false;
+              const target = goal.target;
+              if (goal.condition === "equals" && eventName === target) matched = true;
+              else if (goal.condition === "contains" && eventName.includes(target)) matched = true;
+              else if (goal.condition === "starts_with" && eventName.startsWith(target)) matched = true;
+
+              if (matched && sessionId && visitorId) {
+                await db.insert(goalConversions).values({
+                  goal_id: goal.id,
+                  site_id: siteId,
+                  session_id: sessionId,
+                  visitor_id: visitorId,
+                }).onConflictDoNothing();
+              }
             }
-          }
-        } catch (err) { }
+          } catch (err) { }
+        }
         break;
       }
 
       case "duration": {
-        const sessionId = (data.session_id as string) || "";
+        // NB: no `const sessionId` here — all case clauses share one block
+        // scope, so re-declaring it would put the outer binding used by the
+        // pageview/event cases into the temporal dead zone.
         const durationVal = (data.duration as number) || 0;
 
         // Update the matching pageview row
@@ -382,28 +444,30 @@ async function processPayload(
           }
         }
 
-        // Evaluate Duration Goals
-        try {
-          const siteGoals = await getCachedGoals(siteId);
-          const durationGoals = siteGoals.filter((g) => g.type === "duration");
-          
-          for (const goal of durationGoals) {
-            let matched = false;
-            const targetSecs = parseInt(goal.target, 10);
-            if (!isNaN(targetSecs) && goal.condition === "greater_than" && durationVal > targetSecs) {
-              matched = true;
+        // Evaluate Duration Goals (human traffic only — see pageview case)
+        if (!isBot) {
+          try {
+            const siteGoals = await getCachedGoals(siteId);
+            const durationGoals = siteGoals.filter((g) => g.type === "duration");
+
+            for (const goal of durationGoals) {
+              let matched = false;
+              const targetSecs = parseInt(goal.target, 10);
+              if (!isNaN(targetSecs) && goal.condition === "greater_than" && durationVal > targetSecs) {
+                matched = true;
+              }
+
+              if (matched && sessionId && visitorId) {
+                await db.insert(goalConversions).values({
+                  goal_id: goal.id,
+                  site_id: siteId,
+                  session_id: sessionId,
+                  visitor_id: visitorId,
+                }).onConflictDoNothing();
+              }
             }
-            
-            if (matched && sessionId && data.visitor_id) {
-              await db.insert(goalConversions).values({
-                goal_id: goal.id,
-                site_id: siteId,
-                session_id: sessionId,
-                visitor_id: data.visitor_id as string,
-              }).onConflictDoNothing();
-            }
-          }
-        } catch (err) { }
+          } catch (err) { }
+        }
         break;
       }
     }
@@ -430,12 +494,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ---- Resolve site_id ----
-    let siteId = getCachedSiteId(api_key);
+    // ---- Resolve site ----
+    let site = getCachedSite(api_key);
 
-    if (siteId === undefined) {
+    if (site === undefined) {
       const result = await db
-        .select({ id: sites.id })
+        .select({ id: sites.id, domain: sites.domain })
         .from(sites)
         .where(eq(sites.api_key, api_key))
         .limit(1);
@@ -448,37 +512,18 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      siteId = result[0].id;
-      setCachedSiteId(api_key, siteId);
+      site = { siteId: result[0].id, domain: result[0].domain || "" };
+      setCachedSite(api_key, site.siteId, site.domain);
     }
 
-    if (siteId === "") {
+    if (site.siteId === "") {
       return NextResponse.json(
         { error: "Invalid API key" },
         { status: 400, headers }
       );
     }
 
-    // ---- Extract Bot ----
-    const userAgent = request.headers.get("user-agent") || "";
-    let isBot = false;
-
-    // Pillar 1: Robust UA Filtering (isbot library) + Missing UA
-    if (!userAgent || isbot(userAgent)) {
-      isBot = true;
-    }
-
-    // Pillar 2: Referrer Spam Check
-    const referrer = (data.referrer as string) || request.headers.get("referer") || "";
-    if (!isBot && isSpamReferrer(referrer)) {
-      isBot = true;
-    }
-
-    // Pillar 3: Datacenter / Automated Request Headers
-    // e.g., missing Accept-Language but executing JS is very suspicious
-    if (!isBot && !request.headers.get("accept-language")) {
-      isBot = true;
-    }
+    const siteId = site.siteId;
 
     // ---- Extract Geo-IP ----
     const country =
@@ -495,26 +540,42 @@ export async function POST(request: NextRequest) {
       (data.city as string) ||
       "";
 
-    // ---- Hash IP ----
+    // ---- Identity ----
+    const userAgent = request.headers.get("user-agent") || "";
     const ipStr = getClientIp(request);
     const ipHash = hashIp(ipStr);
+    const visitorId = computeVisitorId(ipStr, userAgent);
 
-    // Pillar 4: Behavioral Rate Limiting
-    if (!isBot) {
-      if (isRateLimited(ipHash) || (data.session_id && isRateLimited(data.session_id as string))) {
-        isBot = true;
-      }
-    }
+    // ---- Request-rate ceilings ----
+    // Keyed on the IP hash only. The old implementation also keyed on
+    // session_id and short-circuited, so the session counter never advanced.
+    const rate = checkRate(ipHash);
 
-    // ---- Drop bot traffic at the edge ----
-    // Bots get a silent 204 but we skip the DB write entirely to save storage.
-    // We still return 204 (not 403) so bot operators don't know they've been filtered.
-    if (isBot) {
+    if (rate.overHard) {
+      // The single place this endpoint discards data. Not a bot judgement —
+      // it is the ceiling that stops a script from filling the database.
+      // Tune with COLLECT_HARD_RATE_LIMIT.
+      console.warn(
+        `[collect] Hard rate ceiling hit for site ${siteId} (>${HARD_RATE_LIMIT}/min from one IP); dropping payload.`
+      );
       return new NextResponse(null, { status: 204, headers });
     }
 
-    // ---- Fire-and-forget (human traffic only) ----
-    processPayload(siteId, type, data, country, city, ipHash, false);
+    // ---- Classify (flag, never drop) ----
+    const verdict: BotVerdict = detectBot({
+      userAgent,
+      header: (name) => request.headers.get(name),
+      payload: data as Record<string, unknown>,
+      siteDomain: site.domain,
+      floodSuspected: rate.overSoft,
+      clientBotHint: data.bot_hint === 1 || data.bot_hint === true,
+    });
+
+    // ---- Fire-and-forget ----
+    // Bot traffic is written too, flagged with its reason and score, so the
+    // filter stays measurable and any false positive is recoverable with an
+    // UPDATE instead of being gone forever. Dashboards exclude is_bot rows.
+    processPayload(siteId, type, data, country, city, ipHash, visitorId, verdict);
 
     return new NextResponse(null, { status: 204, headers });
   } catch (error) {

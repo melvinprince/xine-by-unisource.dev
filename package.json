@@ -14,9 +14,11 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run build:tracker && next build",
+    "build:tracker": "terser src/tracking.js --compress --mangle --output public/t.js",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check:bots": "tsx scripts/bot-detection-check.ts"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
@@ -50,6 +52,7 @@
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
     "terser": "^5.46.1",
+    "tsx": "^4.23.1",
     "typescript": "^5"
   }
 }

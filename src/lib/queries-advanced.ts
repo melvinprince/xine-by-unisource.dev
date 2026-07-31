@@ -33,6 +33,7 @@ import type {
   SessionTimeseriesPoint,
   UserFlowStep,
   PagesPerSessionBucket,
+  BotBreakdown,
 } from "./types";
 
 // ---- Helpers ----
@@ -988,6 +989,72 @@ export async function getRealtimeStats(
       country: c.country || "",
       flag: countryFlag(c.country || ""),
       count: c.count,
+    })),
+  };
+}
+
+// ============================================================
+// BOT FILTER AUDIT
+// ============================================================
+
+/**
+ * Break down flagged traffic by the reason it was flagged.
+ *
+ * This is the feedback loop for src/lib/bot-detection.ts: the filter is only
+ * as good as your ability to see what it caught. A reason bucket that grows
+ * unexpectedly is the signal to re-check its weight — inspect the underlying
+ * rows via /api/sites/{id}/export?include_bots=1.
+ */
+export async function getBotBreakdown(
+  siteId: string | string[],
+  dateRange: DateRange
+): Promise<BotBreakdown> {
+  const scopeConditions = [
+    gte(pageviews.created_at, dateRange.from),
+    lte(pageviews.created_at, dateRange.to),
+  ];
+  if (Array.isArray(siteId)) {
+    if (siteId.length > 0) scopeConditions.push(inArray(pageviews.site_id, siteId));
+    else scopeConditions.push(sql`1 = 0`);
+  } else if (siteId !== "all") {
+    scopeConditions.push(eq(pageviews.site_id, siteId));
+  }
+
+  const [totals] = await db
+    .select({
+      human: sql<number>`COUNT(*) FILTER (WHERE ${pageviews.is_bot} = false)::int`,
+      bot: sql<number>`COUNT(*) FILTER (WHERE ${pageviews.is_bot} = true)::int`,
+    })
+    .from(pageviews)
+    .where(and(...scopeConditions));
+
+  // bot_reason is stored as "reason:signal1,signal2"; group on the reason.
+  const reasonExpr = sql<string>`COALESCE(split_part(${pageviews.bot_reason}, ':', 1), 'unknown')`;
+
+  const rows = await db
+    .select({
+      reason: reasonExpr,
+      count: sql<number>`COUNT(*)::int`,
+      avgScore: sql<number>`COALESCE(ROUND(AVG(${pageviews.bot_score})), 0)::int`,
+    })
+    .from(pageviews)
+    .where(and(...scopeConditions, eq(pageviews.is_bot, true)))
+    .groupBy(reasonExpr)
+    .orderBy(sql`COUNT(*) DESC`);
+
+  const botTotal = totals?.bot || 0;
+  const humanTotal = totals?.human || 0;
+  const grandTotal = botTotal + humanTotal;
+
+  return {
+    humanPageviews: humanTotal,
+    botPageviews: botTotal,
+    botPercentage: grandTotal > 0 ? Math.round((botTotal / grandTotal) * 100) : 0,
+    reasons: rows.map((r) => ({
+      reason: r.reason || "unknown",
+      count: r.count,
+      avgScore: r.avgScore,
+      percentage: botTotal > 0 ? Math.round((r.count / botTotal) * 100) : 0,
     })),
   };
 }

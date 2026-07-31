@@ -13,6 +13,10 @@ export async function GET(
   const format = searchParams.get("format") || "csv";
   const fromStr = searchParams.get("from");
   const toStr = searchParams.get("to");
+  // Exports match the dashboard by default. Pass include_bots=1 to get the
+  // flagged rows too, along with their bot_reason/bot_score — that is how you
+  // audit the filter for false positives.
+  const includeBots = searchParams.get("include_bots") === "1";
 
   const to = toStr ? new Date(toStr) : new Date();
   const from = fromStr ? new Date(fromStr) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -23,17 +27,32 @@ export async function GET(
 
     if (type === "events") {
       rawData = await db.select().from(events)
-        .where(and(eq(events.site_id, siteId), gte(events.created_at, from), lte(events.created_at, to)))
+        .where(and(
+          eq(events.site_id, siteId),
+          gte(events.created_at, from),
+          lte(events.created_at, to),
+          ...(includeBots ? [] : [eq(events.is_bot, false)])
+        ))
         .orderBy(desc(events.created_at))
         .limit(10000); // hard limit to prevent OOM
     } else if (type === "pageviews") {
       rawData = await db.select().from(pageviews)
-        .where(and(eq(pageviews.site_id, siteId), gte(pageviews.created_at, from), lte(pageviews.created_at, to)))
+        .where(and(
+          eq(pageviews.site_id, siteId),
+          gte(pageviews.created_at, from),
+          lte(pageviews.created_at, to),
+          ...(includeBots ? [] : [eq(pageviews.is_bot, false)])
+        ))
         .orderBy(desc(pageviews.created_at))
         .limit(10000);
     } else if (type === "sessions") {
       rawData = await db.select().from(sessions)
-        .where(and(eq(sessions.site_id, siteId), gte(sessions.started_at, from), lte(sessions.started_at, to)))
+        .where(and(
+          eq(sessions.site_id, siteId),
+          gte(sessions.started_at, from),
+          lte(sessions.started_at, to),
+          ...(includeBots ? [] : [eq(sessions.is_bot, false)])
+        ))
         .orderBy(desc(sessions.started_at))
         .limit(10000);
     } else {

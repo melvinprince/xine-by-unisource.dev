@@ -48,10 +48,16 @@ export const pageviews = pgTable(
     connection_type: varchar("connection_type", { length: 50 }),
     ttfb: integer("ttfb"), // Time to first byte
     is_bot: boolean("is_bot").default(false),
+    // Why this row was classified as a bot, and how confident we were.
+    // Kept on every row (bot or not) so the filter itself stays auditable —
+    // see src/lib/bot-detection.ts.
+    bot_reason: varchar("bot_reason", { length: 64 }),
+    bot_score: integer("bot_score").default(0),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("idx_pageviews_site_id").on(table.site_id),
+    index("idx_pageviews_site_bot_created").on(table.site_id, table.is_bot, table.created_at),
     index("idx_pageviews_created_at").on(table.created_at),
     index("idx_pageviews_visitor_id").on(table.visitor_id),
     index("idx_pageviews_session_url").on(table.session_id, table.url),
@@ -75,10 +81,13 @@ export const events = pgTable(
     session_id: text("session_id").notNull(),
     url: text("url"),
     is_bot: boolean("is_bot").default(false),
+    bot_reason: varchar("bot_reason", { length: 64 }),
+    bot_score: integer("bot_score").default(0),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("idx_events_site_id").on(table.site_id),
+    index("idx_events_site_bot_created").on(table.site_id, table.is_bot, table.created_at),
     index("idx_events_created_at").on(table.created_at),
     index("idx_events_name").on(table.name),
     index("idx_events_site_name_idx").on(table.site_id, table.name),
@@ -114,6 +123,8 @@ export const sessions = pgTable(
     timezone: text("timezone"),
     connection_type: text("connection_type"),
     is_bot: boolean("is_bot").notNull().default(false),
+    bot_reason: varchar("bot_reason", { length: 64 }),
+    bot_score: integer("bot_score").default(0),
     is_bounce: boolean("is_bounce").notNull().default(true),
     started_at: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     ended_at: timestamp("ended_at", { withTimezone: true }).notNull().defaultNow(),
