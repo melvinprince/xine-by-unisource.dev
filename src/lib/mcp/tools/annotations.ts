@@ -114,4 +114,49 @@ export function registerAnnotationTools(server: McpServer) {
       return ok({ deleted: deleted[0] });
     })
   );
+
+  server.registerTool(
+    "xine_update_annotation",
+    {
+      title: "Update annotation",
+      description:
+        "Change an existing annotation's text, date or category. Only the fields you pass are changed. Requires the editor or owner role.",
+      inputSchema: {
+        site_id: singleSiteIdParam,
+        annotation_id: z.string().uuid().describe("Annotation UUID from xine_list_annotations."),
+        text: z.string().min(1).max(1024).optional(),
+        date: z.string().optional().describe("New date/time (ISO 8601)."),
+        category: z.string().max(100).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    guard(async (args, extra) => {
+      const userId = getUserId(extra);
+      await requireSiteAccess(userId, args.site_id, "editor");
+
+      const updates: Partial<typeof annotations.$inferInsert> = {};
+      if (args.text !== undefined) updates.text = args.text;
+      if (args.category !== undefined) updates.category = args.category;
+      if (args.date !== undefined) {
+        const date = new Date(args.date);
+        if (isNaN(date.getTime())) {
+          toolError(`Invalid date "${args.date}" — pass an ISO 8601 date like "2026-07-01".`);
+        }
+        updates.date = date;
+      }
+      if (Object.keys(updates).length === 0) {
+        toolError("Nothing to update — pass at least one of: text, date, category.");
+      }
+
+      const updated = await db
+        .update(annotations)
+        .set(updates)
+        .where(and(eq(annotations.id, args.annotation_id), eq(annotations.site_id, args.site_id)))
+        .returning();
+      if (updated.length === 0) {
+        toolError("Annotation not found on this site. Call xine_list_annotations to see existing annotations.");
+      }
+      return ok(updated[0]);
+    })
+  );
 }

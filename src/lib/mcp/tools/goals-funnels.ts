@@ -305,4 +305,191 @@ export function registerGoalFunnelTools(server: McpServer) {
       return ok({ deleted: deleted[0] });
     })
   );
+
+  server.registerTool(
+    "xine_update_goal",
+    {
+      title: "Update goal",
+      description:
+        "Change an existing goal's name, type, condition or target. Only the fields you pass are changed. Past conversions are kept as-is; the new definition applies to traffic from now on. Requires the editor or owner role.",
+      inputSchema: {
+        site_id: singleSiteIdParam,
+        goal_id: z.string().uuid().describe("Goal UUID from xine_list_goals."),
+        name: z.string().min(1).max(256).optional(),
+        type: z.enum(["pageview", "event", "duration"]).optional(),
+        condition: z.enum(["equals", "contains", "starts_with", "greater_than"]).optional(),
+        target: z.string().min(1).max(2048).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    guard(async (args, extra) => {
+      const userId = getUserId(extra);
+      await requireSiteAccess(userId, args.site_id, "editor");
+
+      const updates: Partial<typeof goals.$inferInsert> = {};
+      if (args.name !== undefined) updates.name = args.name;
+      if (args.type !== undefined) updates.type = args.type;
+      if (args.condition !== undefined) updates.condition = args.condition;
+      if (args.target !== undefined) updates.target = args.target;
+      if (Object.keys(updates).length === 0) {
+        toolError("Nothing to update — pass at least one of: name, type, condition, target.");
+      }
+
+      const updated = await db
+        .update(goals)
+        .set(updates)
+        .where(and(eq(goals.id, args.goal_id), eq(goals.site_id, args.site_id)))
+        .returning();
+      if (updated.length === 0) {
+        toolError("Goal not found on this site. Call xine_list_goals to see existing goals.");
+      }
+      clearGoalsCache(args.site_id);
+      return ok(updated[0]);
+    })
+  );
+
+  server.registerTool(
+    "xine_update_funnel",
+    {
+      title: "Update funnel",
+      description:
+        "Rename a funnel or replace its ordered list of steps. Passing steps replaces every step, so send the complete list. Requires the editor or owner role.",
+      inputSchema: {
+        site_id: singleSiteIdParam,
+        funnel_id: z.string().uuid().describe("Funnel UUID from xine_list_funnels."),
+        name: z.string().min(1).max(256).optional(),
+        steps: z
+          .array(
+            z.object({
+              goal_id: z.string().uuid().describe("Goal UUID from xine_list_goals."),
+              name: z.string().min(1).max(256).describe("Step label shown in the funnel chart."),
+            })
+          )
+          .min(2)
+          .max(20)
+          .optional()
+          .describe("Complete replacement list of steps, in order (2–20)."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    guard(async (args, extra) => {
+      const userId = getUserId(extra);
+      await requireSiteAccess(userId, args.site_id, "editor");
+
+      const updates: Partial<typeof funnels.$inferInsert> = {};
+      if (args.name !== undefined) updates.name = args.name;
+      if (args.steps !== undefined) {
+        const siteGoals = await db
+          .select({ id: goals.id })
+          .from(goals)
+          .where(eq(goals.site_id, args.site_id));
+        const valid = new Set(siteGoals.map((g) => g.id));
+        const missing = args.steps.filter((s) => !valid.has(s.goal_id)).map((s) => s.goal_id);
+        if (missing.length > 0) {
+          toolError(
+            `These goal ids don't belong to this site: ${missing.join(", ")}. Call xine_list_goals for valid ids.`
+          );
+        }
+        updates.steps = args.steps.map((s) => ({ goalId: s.goal_id, name: s.name }));
+      }
+      if (Object.keys(updates).length === 0) {
+        toolError("Nothing to update — pass name and/or steps.");
+      }
+
+      const updated = await db
+        .update(funnels)
+        .set(updates)
+        .where(and(eq(funnels.id, args.funnel_id), eq(funnels.site_id, args.site_id)))
+        .returning();
+      if (updated.length === 0) {
+        toolError("Funnel not found on this site. Call xine_list_funnels to see existing funnels.");
+      }
+      return ok(updated[0]);
+    })
+  );
+
+  server.registerTool(
+    "xine_get_goal_conversions",
+    {
+      title: "Get goal conversion records and trend",
+      description:
+        "The individual conversion records behind a goal — session id, visitor id and timestamp — plus a daily conversion trend. Use it to see exactly who converted and when, then feed a visitor_id into xine_get_visitor_journey to see the path they took. Omit goal_id to cover every goal on the site.",
+      inputSchema: {
+        site_id: siteIdParam,
+        goal_id: z.string().uuid().optional().describe("Restrict to one goal. Omit for all goals in scope."),
+        ...dateRangeParams,
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(500)
+          .optional()
+          .describe("Conversion records to return (default 100, max 500)."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    guard(async (args, extra) => {
+      const userId = getUserId(extra);
+      const siteIds = await resolveSiteScope(userId, args.site_id);
+      const dateRange = resolveDateRange(args);
+      const limit = args.limit ?? 100;
+      if (siteIds.length === 0) return ok({ total: 0, records: [], dailyTrend: [], byGoal: [] });
+
+      const where = and(
+        inArray(goalConversions.site_id, siteIds),
+        gte(goalConversions.created_at, dateRange.from),
+        lte(goalConversions.created_at, dateRange.to),
+        ...(args.goal_id ? [eq(goalConversions.goal_id, args.goal_id)] : [])
+      );
+
+      const [records, byGoal, dailyTrend, totalRes] = await Promise.all([
+        db
+          .select({
+            id: goalConversions.id,
+            goal_id: goalConversions.goal_id,
+            goal_name: goals.name,
+            site_id: goalConversions.site_id,
+            session_id: goalConversions.session_id,
+            visitor_id: goalConversions.visitor_id,
+            created_at: goalConversions.created_at,
+          })
+          .from(goalConversions)
+          .leftJoin(goals, eq(goalConversions.goal_id, goals.id))
+          .where(where)
+          .orderBy(sql`${goalConversions.created_at} DESC`)
+          .limit(limit),
+        db
+          .select({
+            goal_id: goalConversions.goal_id,
+            goal_name: goals.name,
+            conversions: sql<number>`COUNT(*)::int`,
+            uniqueVisitors: sql<number>`COUNT(DISTINCT ${goalConversions.visitor_id})::int`,
+          })
+          .from(goalConversions)
+          .leftJoin(goals, eq(goalConversions.goal_id, goals.id))
+          .where(where)
+          .groupBy(goalConversions.goal_id, goals.name)
+          .orderBy(sql`COUNT(*) DESC`),
+        db
+          .select({
+            day: sql<string>`DATE_TRUNC('day', ${goalConversions.created_at})`,
+            conversions: sql<number>`COUNT(*)::int`,
+          })
+          .from(goalConversions)
+          .where(where)
+          .groupBy(sql`DATE_TRUNC('day', ${goalConversions.created_at})`)
+          .orderBy(sql`DATE_TRUNC('day', ${goalConversions.created_at})`),
+        db.select({ total: sql<number>`COUNT(*)::int` }).from(goalConversions).where(where),
+      ]);
+
+      return ok({
+        period: { from: dateRange.from, to: dateRange.to },
+        total: totalRes[0]?.total ?? 0,
+        returned: records.length,
+        byGoal,
+        dailyTrend,
+        records,
+      });
+    })
+  );
 }

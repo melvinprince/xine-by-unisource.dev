@@ -167,6 +167,76 @@ Dashboard user → Login → /dashboard/* → /api/dashboard/* → Drizzle queri
 
 ---
 
+## MCP Server (`/api/mcp`)
+
+Streamable HTTP MCP endpoint exposing the whole platform to AI agents. 56 tools in
+`src/lib/mcp/tools/`, registered by `tools/index.ts`.
+
+| Module | Tools |
+|--------|-------|
+| `sites.ts` | list/create/update/delete sites, get/update feature flags |
+| `analytics.ts` | overview, timeseries, curated breakdowns, realtime, engagement, behavior, web vitals, JS errors, SEO |
+| `goals-funnels.ts` | goals + funnels CRUD, per-step funnel analytics, raw goal conversions |
+| `annotations.ts` | annotations CRUD |
+| `monitoring.ts` | uptime status + history, alert rules CRUD, email reports CRUD |
+| `raw-data.ts` | row-level pageviews/events/sessions queries, visitor journey, event-property discovery |
+| `insights.ts` | any-dimension breakdown, custom-interval timeseries, period comparison, cohort retention, bot audit |
+| `admin.ts` | whoami, platform summary, tracking snippet, site members, API tokens, login-security audit |
+| `sql.ts` | schema introspection, guarded read-only SQL |
+
+### Conventions
+
+- Every tool is prefixed `xine_` and declares `annotations.readOnlyHint`.
+- `site_id` accepts a UUID or `"all"`; `resolveSiteScope` expands `"all"` to only the
+  caller's own sites. Writes go through `requireSiteAccess(..., "editor" | "owner")`.
+- Date ranges come from the shared `dateRangeParams` (`range` | `from`/`to`), default 30d.
+- Tool callbacks are wrapped in `guard()`: `McpToolError`/`ValidationError` messages reach
+  the client, anything else is logged and returned as a generic failure.
+- Analytics tools exclude bot traffic by default; raw-data tools take `include_bots`.
+
+### Access tiers
+
+`requireFullDataAccess` (in `src/lib/mcp/auth.ts`) gates the two tools that reach past a
+single site's analytics — `xine_run_sql` and `xine_get_security_audit`. It allows platform
+admins, or a user who owns every site on their account (the single-operator self-hosted
+case), so a collaborator with viewer/editor access to one site gains nothing extra.
+
+### `xine_run_sql` safety
+
+Read-only by construction, not just by string matching:
+
+1. SELECT/`WITH` only, single statement — checked after stripping comments and string
+   literals, so a filter like `url LIKE '%/create%'` is not mistaken for DDL.
+2. Executed inside a `SET TRANSACTION READ ONLY` transaction with `SET LOCAL
+   statement_timeout`, so Postgres itself rejects any write.
+3. Wrapped in `SELECT * FROM (...) LIMIT n` (default 200, max 1000).
+4. Credential columns (`password_hash`, `*token_hash`, `otp_hash`, `secret`, `token`) are
+   redacted from results, which also covers `SELECT *`.
+
+Note: it is *not* site-scoped — it can read any site's rows, which is why it sits behind
+the full-access gate. Scope with `site_id` in the query when you want one site.
+
+### Connecting a client
+
+```jsonc
+// .mcp.json, or ~/.claude.json under the project
+{
+  "mcpServers": {
+    "xine": {
+      "type": "http",
+      "url": "https://YOUR_XINE_DOMAIN/api/mcp",
+      "headers": { "Authorization": "Bearer xine_..." }
+    }
+  }
+}
+```
+
+Create the token in Dashboard → Settings → API Tokens. Agents should start with
+`xine_whoami` or `xine_get_platform_summary` for orientation, then `xine_describe_schema`
+before writing any SQL.
+
+---
+
 ## Tracking Script (`t.js`)
 
 - **Source:** `src/tracking.js` (human-readable)
