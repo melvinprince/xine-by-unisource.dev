@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { emailReports, sites } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getOverviewStats } from "@/lib/queries";
+import { normalizeTimeZone, zonedDateParts, zonedMidnightToUtc } from "@/lib/query-helpers";
 import nodemailer from "nodemailer";
 
-async function sendEmail(options: { to: string[]; subject: string; html: string }) {
+/**
+ * Send a report. Returns false (without throwing) when SMTP is not
+ * configured, so the caller can leave last_sent untouched and retry once it
+ * is — previously the report was silently marked as sent.
+ */
+async function sendEmail(options: { to: string[]; subject: string; html: string }): Promise<boolean> {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 587);
   const user = process.env.SMTP_USER;
@@ -14,7 +20,7 @@ async function sendEmail(options: { to: string[]; subject: string; html: string 
 
   if (!host || !user || !pass) {
     console.warn("[nodemailer] SMTP credentials not fully configured in environment variables.");
-    return;
+    return false;
   }
 
   const transporter = nodemailer.createTransport({
@@ -30,6 +36,43 @@ async function sendEmail(options: { to: string[]; subject: string; html: string 
     subject: options.subject,
     html: options.html,
   });
+  return true;
+}
+
+type Schedule = "daily" | "weekly" | "monthly";
+
+/**
+ * The most recent COMPLETE reporting period for a schedule, aligned to
+ * calendar boundaries in the report timezone (REPORTS_TIMEZONE, default
+ * UTC): yesterday, last ISO week (Mon–Sun), or last calendar month.
+ *
+ * Windows used to be `now − 1/7/30 days … now`, so they drifted with cron
+ * timing (overlapping or leaving gaps between consecutive reports), never
+ * matched a dashboard day, and "monthly" meant 30 days.
+ */
+function getReportPeriod(schedule: Schedule, now: Date, tz: string): { start: Date; end: Date } {
+  const { year, month, day, weekday } = zonedDateParts(now, tz);
+  if (schedule === "monthly") {
+    return {
+      start: zonedMidnightToUtc(year, month - 1, 1, tz),
+      end: zonedMidnightToUtc(year, month, 1, tz),
+    };
+  }
+  if (schedule === "weekly") {
+    const sinceMonday = (weekday + 6) % 7;
+    return {
+      start: zonedMidnightToUtc(year, month, day - sinceMonday - 7, tz),
+      end: zonedMidnightToUtc(year, month, day - sinceMonday, tz),
+    };
+  }
+  return {
+    start: zonedMidnightToUtc(year, month, day - 1, tz),
+    end: zonedMidnightToUtc(year, month, day, tz),
+  };
+}
+
+function formatPeriodDay(instant: Date, tz: string): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "short", day: "numeric" }).format(instant);
 }
 
 interface ReportStats {
@@ -39,7 +82,7 @@ interface ReportStats {
   avgDuration: number;
 }
 
-function buildReportHtml(siteName: string, schedule: string, stats: ReportStats) {
+function buildReportHtml(siteName: string, schedule: string, stats: ReportStats, periodLabel: string) {
   return `
     <!DOCTYPE html>
     <html>
@@ -118,6 +161,7 @@ function buildReportHtml(siteName: string, schedule: string, stats: ReportStats)
           <div class="header">
             <div class="logo">XINE</div>
             <div class="title">${siteName} — ${schedule} Report</div>
+            <div class="title" style="font-size: 13px;">${periodLabel}</div>
           </div>
           <div class="grid">
             <div class="card">
@@ -133,7 +177,7 @@ function buildReportHtml(siteName: string, schedule: string, stats: ReportStats)
               <div class="card-value">${stats.bounceRate}%</div>
             </div>
             <div class="card">
-              <div class="card-label">Avg. Duration</div>
+              <div class="card-label">Avg. Visit Duration</div>
               <div class="card-value">${Math.round(stats.avgDuration)}s</div>
             </div>
           </div>
@@ -160,52 +204,58 @@ export async function GET(request: NextRequest) {
     const reports = await db.select().from(emailReports);
     let sentCount = 0;
 
+    const tz = normalizeTimeZone(process.env.REPORTS_TIMEZONE);
+    const now = new Date();
+
     for (const report of reports) {
-      // 2. Determine if it's time to send based on schedule and last_sent
-      let shouldSend = false;
-      const now = new Date();
-      if (!report.last_sent) {
-        shouldSend = true;
-      } else {
-        const diffHours = (now.getTime() - report.last_sent.getTime()) / (1000 * 60 * 60);
-        if (report.schedule === 'daily' && diffHours >= 24) shouldSend = true;
-        if (report.schedule === 'weekly' && diffHours >= (24 * 7)) shouldSend = true;
-        if (report.schedule === 'monthly' && diffHours >= (24 * 30)) shouldSend = true;
-      }
+      // 2. Due when the last send happened before the end of the most
+      //    recent complete period. Late or irregular cron runs therefore
+      //    still report exactly that period, once.
+      const schedule: Schedule =
+        report.schedule === "weekly" || report.schedule === "monthly" ? report.schedule : "daily";
+      const period = getReportPeriod(schedule, now, tz);
+      const shouldSend = !report.last_sent || report.last_sent.getTime() < period.end.getTime();
 
       if (shouldSend && Array.isArray(report.recipients) && report.recipients.length > 0) {
-        // 3. Fetch stats for the report period
-        const from = new Date();
-        if (report.schedule === 'daily') from.setDate(from.getDate() - 1);
-        else if (report.schedule === 'weekly') from.setDate(from.getDate() - 7);
-        else from.setDate(from.getDate() - 30);
-
-        const stats = await getOverviewStats(report.site_id, { from, to: now });
+        // 3. Stats for exactly [period.start, period.end) — `to` is inclusive
+        //    in the query layer, hence the −1 ms.
+        const stats = await getOverviewStats(report.site_id, {
+          from: period.start,
+          to: new Date(period.end.getTime() - 1),
+          tz,
+        });
 
         // 4. Get site info
         const site = await db.query.sites.findFirst({
           where: eq(sites.id, report.site_id),
         });
         const siteName = site?.name || report.site_id;
+        const lastDay = new Date(period.end.getTime() - 1);
+        const periodLabel =
+          schedule === "daily"
+            ? formatPeriodDay(period.start, tz)
+            : `${formatPeriodDay(period.start, tz)} – ${formatPeriodDay(lastDay, tz)}`;
 
-        // 5. Send report via Nodemailer
+        // 5. Send report via Nodemailer. last_sent only moves on a real send.
         try {
-          await sendEmail({
+          const sent = await sendEmail({
             to: report.recipients as string[],
-            subject: `${siteName} — ${report.schedule} analytics report`,
-            html: buildReportHtml(siteName, report.schedule, stats),
+            subject: `${siteName} — ${report.schedule} analytics report (${periodLabel})`,
+            html: buildReportHtml(siteName, report.schedule, stats, `${periodLabel} (${tz})`),
           });
+
+          if (sent) {
+            // 6. Update last_sent timestamp
+            await db
+              .update(emailReports)
+              .set({ last_sent: now })
+              .where(eq(emailReports.id, report.id));
+
+            sentCount++;
+          }
         } catch (mailError) {
           console.error(`[CRON] Failed to send email for site ${siteName}:`, mailError);
         }
-
-        // 6. Update last_sent timestamp
-        await db
-          .update(emailReports)
-          .set({ last_sent: now })
-          .where(eq(emailReports.id, report.id));
-        
-        sentCount++;
       }
     }
 

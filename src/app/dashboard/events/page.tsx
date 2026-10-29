@@ -55,7 +55,7 @@ export default function EventsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `events_${selectedSite}_${dateRange.from}_to_${dateRange.to}.csv`);
+    link.setAttribute("download", `events_${selectedSite}_${dateRange.from.slice(0, 10)}_to_${dateRange.to.slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

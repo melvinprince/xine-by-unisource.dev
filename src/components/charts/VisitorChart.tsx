@@ -182,8 +182,12 @@ export default function VisitorChart({
               tickLine={false}
               axisLine={false}
               tickFormatter={(v: string) => {
-                const d = new Date(v);
-                return `${d.getMonth() + 1}/${d.getDate()}`;
+                // Buckets are already local calendar days ("YYYY-MM-DD" or
+                // "YYYY-MM-DD HH:00" in the viewer's tz). Read the parts
+                // directly: new Date("YYYY-MM-DD") is UTC midnight and shows
+                // the previous day west of Greenwich.
+                const [, m, d] = String(v).slice(0, 10).split('-');
+                return `${Number(m)}/${Number(d)}`;
               }}
             />
             <YAxis

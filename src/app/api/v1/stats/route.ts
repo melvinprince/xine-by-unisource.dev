@@ -11,6 +11,7 @@ import {
   getBrowserBreakdown,
   getCountryBreakdown,
 } from "@/lib/queries";
+import { parseDateRange } from "@/lib/api-helpers";
 
 export async function GET(request: NextRequest) {
   try {
@@ -36,16 +37,11 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const rangeStr = searchParams.get("range") || "24h";
-    const from = new Date();
-    
-    switch (rangeStr) {
-      case "24h": from.setHours(from.getHours() - 24); break;
-      case "7d": from.setDate(from.getDate() - 7); break;
-      case "30d": from.setDate(from.getDate() - 30); break;
-      default: from.setHours(from.getHours() - 24);
-    }
+    // Rolling window ending now ("7d" = 7 × 24 h). An optional `tz`
+    // (IANA name) sets the timezone for day buckets; default UTC.
+    const preset = ["24h", "7d", "30d"].includes(rangeStr) ? rangeStr : "24h";
+    const dateRange = parseDateRange(null, null, preset, searchParams.get("tz"))!;
 
-    const dateRange = { from, to: new Date() };
 
     const [
       stats,

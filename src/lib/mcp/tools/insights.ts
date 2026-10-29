@@ -10,7 +10,14 @@ import { db } from "@/lib/db";
 import { events, pageviews, sessions } from "@/lib/db/schema";
 import { sql, type SQL } from "drizzle-orm";
 import { getOverviewStats } from "@/lib/queries";
-import { getBotBreakdown } from "@/lib/queries-advanced";
+import { getBotBreakdown, getRetentionCohorts } from "@/lib/queries-advanced";
+import {
+  cappedSessionDuration,
+  getPreviousDateRange,
+  localTimestamp,
+  pagePathSql,
+  pageviewSourceClassifier,
+} from "@/lib/query-helpers";
 import type { DateRange } from "@/lib/types";
 import { resolveSiteScope, toolError } from "../auth";
 import {
@@ -23,8 +30,15 @@ import {
   siteIdParam,
 } from "../helpers";
 
-/** Dimensions available on the pageviews table for generic breakdowns. */
+/**
+ * Dimensions available on the pageviews table for generic breakdowns.
+ * `path` is the URL without query string (how the dashboard groups pages);
+ * `source` is the normalised traffic source from the shared classifier
+ * (Google/Bing/Direct/…); `url` and `referrer` are the raw stored values.
+ */
 const PAGEVIEW_DIMENSIONS = {
+  path: pagePathSql(pageviews.url),
+  source: pageviewSourceClassifier().name,
   url: pageviews.url,
   title: pageviews.title,
   referrer: pageviews.referrer,
@@ -68,7 +82,7 @@ export function registerInsightTools(server: McpServer) {
     {
       title: "Break traffic down by any dimension",
       description:
-        "Group traffic by any single stored pageview dimension and get pageviews, unique visitors and sessions for each value. Dimensions: url, title, referrer, utm_source, utm_medium, utm_campaign, country, city, continent, browser, os, device, screen, language, timezone, connection_type. This complements xine_get_breakdown (which has the curated reports like exit rates and source quality) by covering the dimensions those reports omit — operating systems, languages, timezones and screen sizes. Note: city and continent are only populated when the hosting layer sends visitor-location headers (x-vercel-ip-city / cf-ipcity); on installs without them these two come back empty, which is a collection gap and not a missing row.",
+        "Group traffic by any single stored pageview dimension and get pageviews, unique visitors and sessions for each value. Dimensions: path (URL without query string), source (normalised traffic source, pageview-level), url (raw, with query string), title, referrer (raw), utm_source, utm_medium, utm_campaign, country, city, continent, browser, os, device, screen, language, timezone, connection_type. This complements xine_get_breakdown (which has the curated reports like exit rates and source quality) by covering the dimensions those reports omit — operating systems, languages, timezones and screen sizes. Note: city and continent are only populated when the hosting layer sends visitor-location headers (x-vercel-ip-city / cf-ipcity); on installs without them these two come back empty, which is a collection gap and not a missing row.",
       inputSchema: {
         site_id: siteIdParam,
         dimension: z
@@ -143,7 +157,7 @@ export function registerInsightTools(server: McpServer) {
     {
       title: "Get a timeseries for one metric at a chosen interval",
       description:
-        "Bucket a single metric over time at an interval you choose: hour, day, week or month. Metrics: pageviews, visitors (unique), sessions, events, bounce_rate (%), avg_session_duration (seconds). Unlike xine_get_timeseries, which picks the bucket size for you, this lets you control the grain — e.g. monthly pageviews across a year, or hourly visitors for one day.",
+        "Bucket a single metric over time at an interval you choose: hour, day, week or month (buckets are in the optional timezone, default UTC). Metrics: pageviews, visitors (unique), sessions, events, bounce_rate (%), avg_session_duration (seconds, each session capped at 4 h). Unlike xine_get_timeseries, which picks the bucket size for you, this lets you control the grain — e.g. monthly pageviews across a year, or hourly visitors for one day.",
       inputSchema: {
         site_id: siteIdParam,
         metric: z
@@ -164,20 +178,24 @@ export function registerInsightTools(server: McpServer) {
       const bucket = sql.raw(`'${INTERVALS[args.interval]}'`);
       const botFilter = args.include_bots ? sql`` : sql`AND is_bot = false`;
       const scope = sql`site_id IN (${siteIdList(siteIds)})`;
+      // Buckets are wall-clock periods in the requested timezone (default
+      // UTC), returned as text so the label is unambiguous.
+      const fmt = sql.raw(args.interval === "hour" ? `'YYYY-MM-DD HH24:00'` : `'YYYY-MM-DD'`);
+      const bucketOf = (col: SQL) => sql`to_char(DATE_TRUNC(${bucket}, ${localTimestamp(col, dateRange)}), ${fmt})`;
 
       let query: SQL;
       if (args.metric === "pageviews" || args.metric === "visitors") {
         const agg =
           args.metric === "pageviews" ? sql`COUNT(*)::int` : sql`COUNT(DISTINCT visitor_id)::int`;
         query = sql`
-          SELECT DATE_TRUNC(${bucket}, created_at) AS bucket, ${agg} AS value
+          SELECT ${bucketOf(sql`created_at`)} AS bucket, ${agg} AS value
           FROM ${pageviews}
           WHERE ${scope} AND created_at >= ${dateRange.from} AND created_at <= ${dateRange.to} ${botFilter}
           GROUP BY 1 ORDER BY 1
         `;
       } else if (args.metric === "events") {
         query = sql`
-          SELECT DATE_TRUNC(${bucket}, created_at) AS bucket, COUNT(*)::int AS value
+          SELECT ${bucketOf(sql`created_at`)} AS bucket, COUNT(*)::int AS value
           FROM ${events}
           WHERE ${scope} AND created_at >= ${dateRange.from} AND created_at <= ${dateRange.to} ${botFilter}
           GROUP BY 1 ORDER BY 1
@@ -188,9 +206,9 @@ export function registerInsightTools(server: McpServer) {
             ? sql`COUNT(*)::int`
             : args.metric === "bounce_rate"
               ? sql`ROUND(100.0 * COUNT(*) FILTER (WHERE is_bounce = true) / NULLIF(COUNT(*), 0), 1)::float`
-              : sql`ROUND(COALESCE(AVG(total_duration), 0))::int`;
+              : sql`ROUND(COALESCE(AVG(${cappedSessionDuration(sql`total_duration`)}), 0))::int`;
         query = sql`
-          SELECT DATE_TRUNC(${bucket}, started_at) AS bucket, ${agg} AS value
+          SELECT ${bucketOf(sql`started_at`)} AS bucket, ${agg} AS value
           FROM ${sessions}
           WHERE ${scope} AND started_at >= ${dateRange.from} AND started_at <= ${dateRange.to} ${botFilter}
           GROUP BY 1 ORDER BY 1
@@ -206,6 +224,7 @@ export function registerInsightTools(server: McpServer) {
       return ok({
         metric: args.metric,
         interval: args.interval,
+        timezone: dateRange.tz ?? "UTC",
         period: { from: dateRange.from, to: dateRange.to },
         points,
       });
@@ -220,7 +239,7 @@ export function registerInsightTools(server: McpServer) {
     {
       title: "Compare two periods side by side",
       description:
-        "Compare headline metrics (visitors, pageviews, avg duration, bounce rate) between two arbitrary periods, with absolute and percentage deltas. Period A is the normal range/from/to. Period B defaults to the immediately preceding period of the same length; set compare to \"previous_year\" to shift back a year, or \"custom\" and pass compare_from/compare_to. Optionally also compares one dimension breakdown so you can see which pages or sources moved.",
+        "Compare headline metrics (visitors, pageviews, avg visit duration, bounce rate) between two arbitrary periods, with absolute and percentage deltas. Period A is the normal range/from/to. Period B defaults to the immediately preceding period of the same length; set compare to \"previous_year\" to shift back a year, or \"custom\" and pass compare_from/compare_to. Optionally also compares one dimension breakdown so you can see which pages or sources moved.",
       inputSchema: {
         site_id: siteIdParam,
         ...dateRangeParams,
@@ -243,7 +262,6 @@ export function registerInsightTools(server: McpServer) {
       const siteIds = await resolveSiteScope(userId, args.site_id);
       const periodA = resolveDateRange(args);
       const mode = args.compare ?? "previous_period";
-      const spanMs = periodA.to.getTime() - periodA.from.getTime();
 
       let periodB: DateRange;
       if (mode === "custom") {
@@ -255,15 +273,16 @@ export function registerInsightTools(server: McpServer) {
         if (isNaN(from.getTime()) || isNaN(to.getTime()) || from >= to) {
           toolError("Invalid compare_from/compare_to — both must be valid dates with compare_from before compare_to.");
         }
-        periodB = { from, to };
+        periodB = { from, to, tz: periodA.tz };
       } else if (mode === "previous_year") {
         const from = new Date(periodA.from);
         const to = new Date(periodA.to);
         from.setFullYear(from.getFullYear() - 1);
         to.setFullYear(to.getFullYear() - 1);
-        periodB = { from, to };
+        periodB = { from, to, tz: periodA.tz };
       } else {
-        periodB = { from: new Date(periodA.from.getTime() - spanMs), to: new Date(periodA.from) };
+        // Same exact-millisecond window the dashboard trend arrows use.
+        periodB = getPreviousDateRange(periodA);
       }
 
       const [statsA, statsB] = await Promise.all([
@@ -350,47 +369,9 @@ export function registerInsightTools(server: McpServer) {
       const dateRange = resolveDateRange(args);
       if (siteIds.length === 0) return ok({ cohorts: [], grid: [] });
 
-      const result = await db.execute(sql`
-        WITH scoped AS (
-          SELECT visitor_id, started_at
-          FROM ${sessions}
-          WHERE site_id IN (${siteIdList(siteIds)})
-            AND started_at >= ${dateRange.from}
-            AND started_at <= ${dateRange.to}
-            AND is_bot = false
-        ),
-        cohorts AS (
-          SELECT visitor_id, DATE_TRUNC('week', MIN(started_at)) AS cohort_week
-          FROM scoped GROUP BY visitor_id
-        ),
-        activity AS (
-          SELECT DISTINCT visitor_id, DATE_TRUNC('week', started_at) AS activity_week
-          FROM scoped
-        ),
-        cohort_size AS (
-          SELECT cohort_week, COUNT(DISTINCT visitor_id)::int AS total_users
-          FROM cohorts GROUP BY cohort_week
-        )
-        SELECT
-          c.cohort_week AS "cohortWeek",
-          s.total_users AS "cohortSize",
-          (EXTRACT(EPOCH FROM (a.activity_week - c.cohort_week)) / 604800)::int AS "weekNumber",
-          COUNT(DISTINCT a.visitor_id)::int AS "returnedUsers"
-        FROM cohorts c
-        JOIN activity a ON a.visitor_id = c.visitor_id
-        JOIN cohort_size s ON s.cohort_week = c.cohort_week
-        GROUP BY c.cohort_week, s.total_users, a.activity_week
-        ORDER BY c.cohort_week DESC, "weekNumber" ASC
-      `);
-
-      const rows = (
-        result.rows as unknown as {
-          cohortWeek: string;
-          cohortSize: number;
-          weekNumber: number;
-          returnedUsers: number;
-        }[]
-      ).map((r) => ({
+      // Shared with the dashboard retention route (bots excluded, weeks in
+      // the requested timezone).
+      const rows = (await getRetentionCohorts(siteIds, dateRange)).map((r) => ({
         ...r,
         retentionPercent: r.cohortSize > 0 ? Number(((r.returnedUsers / r.cohortSize) * 100).toFixed(1)) : 0,
       }));
@@ -408,7 +389,7 @@ export function registerInsightTools(server: McpServer) {
 
       return ok({
         period: { from: dateRange.from, to: dateRange.to },
-        note: 'weekNumber 0 is the cohort’s own week, so its retention is always 100%. Cohorts are bounded by the requested period, so visitors first seen before "from" are counted as new here.',
+        note: 'weekNumber 0 is the cohort’s own week, so its retention is always 100%. Cohorts are bounded by the requested period, so visitors first seen before "from" are counted as new here. visitor_id is a daily-rotating hash (no cookies), so weeks ≥ 1 understate true retention.',
         cohorts: rows,
         grid: Array.from(gridMap.values()),
       });
@@ -439,7 +420,7 @@ export function registerInsightTools(server: McpServer) {
       const [breakdown, trendRes] = await Promise.all([
         getBotBreakdown(siteIds, dateRange),
         db.execute(sql`
-          SELECT DATE_TRUNC('day', created_at) AS bucket,
+          SELECT to_char(DATE_TRUNC('day', ${localTimestamp(sql`created_at`, dateRange)}), 'YYYY-MM-DD') AS bucket,
                  COUNT(*) FILTER (WHERE is_bot = true)::int AS bots,
                  COUNT(*) FILTER (WHERE is_bot = false)::int AS humans
           FROM ${pageviews}

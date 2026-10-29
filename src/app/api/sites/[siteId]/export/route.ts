@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { events, pageviews, sessions } from "@/lib/db/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { parseDateRange, parseTimeZoneParam } from "@/lib/api-helpers";
 
 export async function GET(
   request: NextRequest,
@@ -18,9 +19,13 @@ export async function GET(
   // audit the filter for false positives.
   const includeBots = searchParams.get("include_bots") === "1";
 
-  const to = toStr ? new Date(toStr) : new Date();
-  const from = fromStr ? new Date(fromStr) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  to.setHours(23, 59, 59, 999);
+  // Same bounds as the dashboard: date-only values are whole days in the
+  // viewer's timezone, not in the server's local zone.
+  const range = parseDateRange(fromStr, toStr, "30d", parseTimeZoneParam(searchParams));
+  if (!range) {
+    return NextResponse.json({ error: "Invalid date range" }, { status: 400 });
+  }
+  const { from, to } = range;
 
   try {
     let rawData: Record<string, unknown>[] = [];

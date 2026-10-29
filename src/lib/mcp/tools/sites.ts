@@ -9,6 +9,8 @@ import { db } from "@/lib/db";
 import { sites, siteSettings, userSites } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { requireSiteAccess, toolError } from "../auth";
+import { invalidateCachedSite } from "@/lib/api-key-cache";
+import { normalizeSiteDomain } from "@/lib/validation";
 import { getUserId, guard, ok, singleSiteIdParam } from "../helpers";
 
 const DEFAULT_FEATURES = {
@@ -27,7 +29,8 @@ const domainParam = z
   .string()
   .min(1)
   .max(512)
-  .describe('Website domain, e.g. "example.com" (protocol is stripped automatically).');
+  .refine((d) => normalizeSiteDomain(d) !== "", "Invalid domain: expected a hostname such as example.com")
+  .describe('Website domain, e.g. "example.com" (protocol, path and "www." are stripped automatically).');
 
 const featureFlagsShape = {
   web_vitals: z.boolean().optional(),
@@ -41,8 +44,10 @@ const featureFlagsShape = {
   form_abandonment: z.boolean().optional(),
 };
 
+// Same normalisation as the dashboard's site forms, so a domain set through
+// MCP is matched against collect requests' Origin exactly like one set there.
 function cleanDomain(domain: string): string {
-  return domain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  return normalizeSiteDomain(domain);
 }
 
 export function registerSiteTools(server: McpServer) {
@@ -153,6 +158,7 @@ export function registerSiteTools(server: McpServer) {
 
       try {
         const result = await db.update(sites).set(updates).where(eq(sites.id, args.site_id)).returning();
+        if (updates.domain !== undefined) invalidateCachedSite(args.site_id);
         return ok(result[0]);
       } catch (error) {
         if ((error as { code?: string }).code === "23505") {

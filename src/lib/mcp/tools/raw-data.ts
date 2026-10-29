@@ -73,7 +73,10 @@ export function registerRawDataTools(server: McpServer) {
         os: z.string().optional().describe('e.g. "Windows".'),
         device: z.string().optional().describe('"desktop", "mobile" or "tablet".'),
         language: z.string().optional().describe('e.g. "en-US".'),
-        timezone: z.string().optional().describe('e.g. "Europe/Berlin".'),
+        // Filters on the visitor's stored browser timezone. Named "timezone" for
+        // backwards compatibility, so it intentionally shadows the shared
+        // report-timezone param: this tool returns raw rows (UTC timestamps).
+        timezone: z.string().optional().describe('Visitor browser timezone filter, e.g. "Europe/Berlin". Date-only from/to are read as UTC days in this tool.'),
         connection_type: z.string().optional().describe('e.g. "4g".'),
         utm_source: z.string().optional(),
         utm_medium: z.string().optional(),
@@ -90,7 +93,7 @@ export function registerRawDataTools(server: McpServer) {
     guard(async (args, extra) => {
       const userId = getUserId(extra);
       const siteIds = await resolveSiteScope(userId, args.site_id);
-      const dateRange = resolveDateRange(args);
+      const dateRange = resolveDateRange({ range: args.range, from: args.from, to: args.to });
       const limit = args.limit ?? 50;
       const offset = args.offset ?? 0;
 

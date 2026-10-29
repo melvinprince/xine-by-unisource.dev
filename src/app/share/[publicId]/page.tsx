@@ -101,7 +101,7 @@ export default function PublicSharePage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard label="Visitors" value={stats.visitors} change={stats.visitorsChange} icon={<Users size={20} />} delay={0.1} />
           <StatCard label="Pageviews" value={stats.pageviews} change={stats.pageviewsChange} icon={<Eye size={20} />} delay={0.15} />
-          <StatCard label="Avg. Duration" value={stats.avgDuration} change={stats.durationChange} format="duration" icon={<Clock size={20} />} delay={0.2} />
+          <StatCard label="Avg. Visit Duration" value={stats.avgDuration} change={stats.durationChange} format="duration" icon={<Clock size={20} />} delay={0.2} />
           <StatCard label="Bounce Rate" value={stats.bounceRate} change={stats.bounceRateChange} format="percent" icon={<ArrowDownUp size={20} />} delay={0.25} />
         </div>
 

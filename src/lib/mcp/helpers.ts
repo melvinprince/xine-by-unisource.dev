@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { parseDateRange } from "@/lib/api-helpers";
+import { normalizeTimeZone } from "@/lib/query-helpers";
 import { ValidationError } from "@/lib/validation";
 import type { DateRange } from "@/lib/types";
 import { McpToolError, toolError } from "./auth";
@@ -35,7 +36,13 @@ export const dateRangeParams = {
   to: z
     .string()
     .optional()
-    .describe("End date/time (ISO 8601). Defaults to now."),
+    .describe("End date/time (ISO 8601). A date-only value means the end of that day. Defaults to now."),
+  timezone: z
+    .string()
+    .optional()
+    .describe(
+      'IANA timezone for day/hour buckets and date-only from/to, e.g. "Europe/Berlin". Defaults to "UTC". Use "America/Los_Angeles" to line days up with Google Search Console.'
+    ),
 };
 
 export const limitParam = z
@@ -51,16 +58,25 @@ export const filtersParam = z
     countries: z.array(z.string()).optional().describe('Country codes, e.g. ["US", "DE"].'),
     browsers: z.array(z.string()).optional().describe('Browser names, e.g. ["Chrome", "Safari"].'),
     devices: z.array(z.string()).optional().describe('Device types: "desktop", "mobile", "tablet".'),
-    sources: z.array(z.string()).optional().describe('Referrer hosts, e.g. ["google.com"].'),
-    pages: z.array(z.string()).optional().describe('URL paths, e.g. ["/pricing"].'),
+    sources: z
+      .array(z.string())
+      .optional()
+      .describe('Traffic sources as named in the "sources" breakdown, e.g. ["Google", "Direct", "Bing"]; raw referrer hosts like "google.com" also match. Applied per session, using the entry source of each session.'),
+    pages: z
+      .array(z.string())
+      .optional()
+      .describe('URL paths, e.g. ["/pricing"]. Keeps whole sessions that viewed one of these pages (query strings ignored).'),
   })
   .optional()
   .describe("Optional dimension filters to narrow the data.");
 
 // ---- Helpers ----
 
-export function resolveDateRange(args: { range?: string; from?: string; to?: string }): DateRange {
-  const parsed = parseDateRange(args.from ?? null, args.to ?? null, args.range ?? null);
+export function resolveDateRange(args: { range?: string; from?: string; to?: string; timezone?: string }): DateRange {
+  if (args.timezone && normalizeTimeZone(args.timezone) !== args.timezone.trim() && args.timezone.trim().toUpperCase() !== "UTC") {
+    toolError(`Unknown timezone "${args.timezone}". Use an IANA name such as "Europe/Berlin" or "America/Los_Angeles".`);
+  }
+  const parsed = parseDateRange(args.from ?? null, args.to ?? null, args.range ?? null, args.timezone ?? null);
   if (!parsed) {
     toolError('Invalid date range: "from" and "to" must be valid dates with "from" before "to".');
   }

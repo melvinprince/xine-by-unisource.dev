@@ -9,7 +9,15 @@
 // flags one of them is a regression, not a tuning win.
 // ============================================================
 
-import { detectBot, hostMatchesDomain, BOT_SCORE_THRESHOLD } from "../src/lib/bot-detection";
+import {
+  detectBot,
+  hostMatchesDomain,
+  isValidHostname,
+  inheritSessionVerdict,
+  encodeBotReason,
+  BOT_SCORE_THRESHOLD,
+} from "../src/lib/bot-detection";
+import { normalizeSiteDomain } from "../src/lib/validation";
 import { getClientIp } from "../src/lib/client-ip";
 import type { NextRequest } from "next/server";
 
@@ -20,6 +28,7 @@ type Case = {
   headers: Record<string, string>;
   payload?: Record<string, unknown>;
   siteDomain?: string;
+  country?: string;
   flood?: boolean;
   clientBotHint?: boolean;
 };
@@ -128,6 +137,16 @@ const cases: Case[] = [
     siteDomain: "example.com",
   },
   {
+    // A malformed registered domain can never match any origin; the origin
+    // check must fail open instead of adding +45 to every hit for the site.
+    name: "Malformed site domain (example..com) + no accept-language",
+    expectBot: false,
+    ua: CHROME,
+    headers: { ...beaconHeaders, "accept-language": "" },
+    payload: goodPayload,
+    siteDomain: "example..com",
+  },
+  {
     name: "localhost dev",
     expectBot: false,
     ua: CHROME,
@@ -153,7 +172,78 @@ const cases: Case[] = [
     siteDomain: "example.com",
   },
 
+  {
+    // wheretomovie.com: thousands of these a month — mainland users on a VPN.
+    name: "Chinese visitor on a VPN (Shanghai zone, Singapore IP)",
+    expectBot: false,
+    ua: CHROME,
+    headers: beaconHeaders,
+    payload: { ...goodPayload, timezone: "Asia/Shanghai", language: "zh-CN" },
+    siteDomain: "example.com",
+    country: "SG",
+  },
+  {
+    name: "Linux desktop with the OS clock on UTC",
+    expectBot: false,
+    ua: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    headers: beaconHeaders,
+    payload: { ...goodPayload, os: "Linux", timezone: "UTC" },
+    siteDomain: "example.com",
+  },
+  {
+    name: "Tor / resistFingerprinting Firefox (UTC, rounded window)",
+    expectBot: false,
+    ua: "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0",
+    headers: beaconHeaders,
+    payload: { ...goodPayload, browser: "Firefox", os: "Windows", screen: "1000x900", timezone: "UTC" },
+    siteDomain: "example.com",
+  },
+  {
+    name: "Windows Chrome on UTC, otherwise normal",
+    expectBot: false,
+    ua: CHROME,
+    headers: beaconHeaders,
+    payload: { ...goodPayload, timezone: "UTC" },
+    siteDomain: "example.com",
+  },
+  {
+    name: "Square phone screen report (not desktop)",
+    expectBot: false,
+    ua: SAFARI_IOS,
+    headers: beaconHeaders,
+    payload: { browser: "Safari", os: "iOS", device: "tablet", screen: "820x820", timezone: "Europe/London", language: "en-GB" },
+    siteDomain: "example.com",
+  },
+
   // ---------- must be flagged ----------
+  {
+    // landager.com: ~17k pageviews from ~5.4k Singapore IPs, Aug–Oct 2026.
+    name: "Proxy fleet: square 1366x1366 desktop, Shanghai zone, SG IP",
+    expectBot: true,
+    ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    headers: beaconHeaders,
+    payload: { browser: "Chrome", os: "macOS", device: "desktop", screen: "1366x1366", timezone: "Asia/Shanghai", language: "en-US" },
+    siteDomain: "example.com",
+    country: "SG",
+  },
+  {
+    name: "Headless crawler: 800x600 with a UTC clock",
+    expectBot: true,
+    ua: CHROME,
+    headers: beaconHeaders,
+    payload: { ...goodPayload, screen: "800x600", timezone: "UTC", language: "en-US" },
+    siteDomain: "example.com",
+    country: "US",
+  },
+  {
+    name: "Headless crawler: 800x600, Shanghai zone, US IP",
+    expectBot: true,
+    ua: CHROME,
+    headers: beaconHeaders,
+    payload: { ...goodPayload, screen: "800x600", timezone: "Asia/Shanghai", language: "en-US" },
+    siteDomain: "example.com",
+    country: "US",
+  },
   { name: "Missing UA", expectBot: true, ua: "", headers: beaconHeaders, payload: goodPayload },
   {
     name: "Googlebot",
@@ -236,6 +326,7 @@ for (const c of cases) {
     header: (n) => lower[n.toLowerCase()] ?? null,
     payload: c.payload ?? {},
     siteDomain: c.siteDomain,
+    country: c.country,
     floodSuspected: c.flood,
     clientBotHint: c.clientBotHint,
   });
@@ -263,6 +354,76 @@ for (const [host, domain, expected] of domainCases) {
   const ok = got === expected;
   if (!ok) failed++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${host} vs ${domain} -> ${got}`);
+}
+
+// hostname validity (site domain validation + origin-check fail-open)
+const hostnameCases: [string, boolean][] = [
+  ["example.com", true],
+  ["app.example.co.uk", true],
+  ["xn--80ak6aa92e.com", true],
+  ["example.xn--p1ai", true],
+  ["localhost", true],
+  ["203.0.113.7", true],
+  ["fixingenvironment..com", false],
+  ["-bad.com", false],
+  ["bad-.com", false],
+  ["example", false],
+  ["exa mple.com", false],
+  ["", false],
+];
+console.log("\nhostname validity:");
+for (const [host, expected] of hostnameCases) {
+  const got = isValidHostname(host);
+  const ok = got === expected;
+  if (!ok) failed++;
+  console.log(`${ok ? "PASS" : "FAIL"}  "${host}" -> ${got}`);
+}
+
+// site domain normalisation (what createSiteSchema/updateSiteSchema store)
+const siteDomainCases: [string, string][] = [
+  ["example.com", "example.com"],
+  ["  Example.COM ", "example.com"],
+  ["https://www.example.com/", "example.com"],
+  ["http://shop.example.com:8080/path?q=1", "shop.example.com"],
+  ["www.example.com", "example.com"],
+  ["example.com.", "example.com"],
+  ["fixingenvironment..com", ""],
+  ["not a domain", ""],
+  ["example", ""],
+];
+console.log("\nsite domain normalisation:");
+for (const [input, expected] of siteDomainCases) {
+  const got = normalizeSiteDomain(input);
+  const ok = got === expected;
+  if (!ok) failed++;
+  console.log(`${ok ? "PASS" : "FAIL"}  "${input}" -> "${got}"${ok ? "" : ` (expected "${expected}")`}`);
+}
+
+// session verdict inheritance (events/durations attached to a bot session)
+console.log("\nsession verdict inheritance:");
+{
+  const human = { isBot: false, reason: null, score: 15, signals: ["accept_language_missing"] } as const;
+  const inherited = inheritSessionVerdict({ ...human, signals: [...human.signals] }, { reason: "heuristic:screen_square,timezone_utc", score: 60 });
+  const checks: [string, boolean][] = [
+    ["human event on bot session becomes bot", inherited.isBot === true],
+    ["keeps session's reason prefix", inherited.reason === "heuristic"],
+    ["score is max of both", inherited.score === 60],
+    ["records session_inherited signal", inherited.signals[0] === "session_inherited"],
+    [
+      "unknown prefix falls back to heuristic",
+      inheritSessionVerdict({ ...human, signals: [] }, { reason: "human:x", score: null }).reason === "heuristic",
+    ],
+    [
+      "never downgrades a bot verdict",
+      inheritSessionVerdict({ isBot: true, reason: "ua_crawler", score: 100, signals: ["ua_crawler"] }, { reason: null, score: 0 }).reason === "ua_crawler",
+    ],
+    ["human verdict with signals is encoded for audit", encodeBotReason({ ...human, signals: [...human.signals] }) === "human:accept_language_missing"],
+    ["clean human verdict encodes to null", encodeBotReason({ isBot: false, reason: null, score: 0, signals: [] }) === null],
+  ];
+  for (const [name, ok] of checks) {
+    if (!ok) failed++;
+    console.log(`${ok ? "PASS" : "FAIL"}  ${name}`);
+  }
 }
 
 // ---- Client IP resolution ----

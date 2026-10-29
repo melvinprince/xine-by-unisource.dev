@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sites } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { invalidateCachedSite } from "@/lib/api-key-cache";
 import { validateOrThrow, updateSiteSchema, uuidSchema, ValidationError } from "@/lib/validation";
 
 /**
@@ -109,6 +110,9 @@ export async function PATCH(
         { status: 404 }
       );
     }
+
+    // The collect route checks Origin against the cached domain.
+    if (updates.domain !== undefined) invalidateCachedSite(siteId);
 
     return NextResponse.json({
       ...result[0],

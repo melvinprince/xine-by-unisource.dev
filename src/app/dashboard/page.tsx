@@ -44,7 +44,9 @@ export default function DashboardPage() {
   };
 
   const handleDateClick = (dateStr: string) => {
-    const dayStr = dateStr.split('T')[0];
+    // Buckets are "YYYY-MM-DD" (daily) or "YYYY-MM-DD HH:00" (hourly), in
+    // the viewer's timezone; a date-only range is read in that zone too.
+    const dayStr = dateStr.slice(0, 10);
     const dateObj = new Date(dayStr + 'T00:00:00Z');
     const label = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
     setDateRange({ from: dayStr, to: dayStr, label });
@@ -158,7 +160,7 @@ export default function DashboardPage() {
             delay={0.15}
           />
           <StatCard
-            label={<>Avg. Duration <HelpTooltip title="Average Duration" content="Average time visitors spend on your site per session. Calculated from page load to the last recorded interaction." /></>}
+            label={<>Avg. Visit Duration <HelpTooltip title="Average Visit Duration" content="Average engaged time per visit (session), summed across the pages of the visit. Each visit is capped at 4 hours so tabs left open don't distort the average. The Duration column in Top Pages is time on page (capped at 30 minutes per pageview)." /></>}
             value={stats.avgDuration}
             change={stats.durationChange}
             format="duration"
@@ -166,7 +168,7 @@ export default function DashboardPage() {
             delay={0.2}
           />
           <StatCard
-            label={<>Bounce Rate <HelpTooltip title="Bounce Rate" content="Percentage of visitors who left after viewing only one page. A lower bounce rate indicates better engagement." /></>}
+            label={<>Bounce Rate <HelpTooltip title="Bounce Rate" content="Percentage of visits (sessions) with only one pageview. A lower bounce rate indicates better engagement." /></>}
             value={stats.bounceRate}
             change={stats.bounceRateChange}
             format="percent"
@@ -222,7 +224,7 @@ export default function DashboardPage() {
               },
               {
                 key: 'avgDuration' as const,
-                label: 'Duration',
+                label: 'Time on Page',
                 align: 'right' as const,
                 render: (v) => formatDuration(Number(v)),
               },
@@ -252,13 +254,13 @@ export default function DashboardPage() {
                 ),
               },
               {
-                key: 'visitors' as const,
-                label: 'Visitors',
+                key: 'sessions' as const,
+                label: 'Visits',
                 align: 'right' as const,
               },
               {
                 key: 'percentage' as const,
-                label: '%',
+                label: '% of visits',
                 align: 'right' as const,
                 render: (v) => (
                   <div

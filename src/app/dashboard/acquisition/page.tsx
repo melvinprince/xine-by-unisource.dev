@@ -40,7 +40,7 @@ export default function AcquisitionPage() {
       <div className="glass-card" style={{ padding: '1.25rem' }}>
         <SectionHeader
           title="Traffic Source Quality"
-          description="Compare traffic sources by engagement quality score (0–100)"
+          description="Top traffic sources by visits, each with an engagement quality score (0–100)"
         />
 
         {sourceQuality.length > 0 ? (
@@ -79,7 +79,7 @@ export default function AcquisitionPage() {
                   <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-primary)', fontVariantNumeric: 'tabular-nums' }}>
                     {formatDuration(source.avgDuration)}
                   </div>
-                  <div style={{ fontSize: '0.625rem', color: 'var(--color-text-muted)' }}>Avg Duration</div>
+                  <div style={{ fontSize: '0.625rem', color: 'var(--color-text-muted)' }}>Avg Visit</div>
                 </div>
 
                 <div style={{ textAlign: 'center' }}>
@@ -192,7 +192,7 @@ export default function AcquisitionPage() {
               },
               {
                 key: 'avgDuration' as const,
-                label: 'Avg Duration',
+                label: 'Avg Visit',
                 align: 'right' as const,
                 render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDuration(Number(v))}</span>,
               },

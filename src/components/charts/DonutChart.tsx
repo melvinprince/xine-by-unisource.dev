@@ -74,7 +74,7 @@ export default function DonutChart({ data, title = "Devices", onSegmentClick, se
       className="glass-card"
       style={{ padding: '1.5rem', opacity: 0 }}
     >
-      <SectionHeader title={title} />
+      <SectionHeader title={title} description="Unique visitors" />
 
       <div style={{ width: '100%', height: 200 }}>
         <ResponsiveContainer>

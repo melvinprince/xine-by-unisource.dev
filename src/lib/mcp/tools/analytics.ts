@@ -73,7 +73,7 @@ export function registerAnalyticsTools(server: McpServer) {
     {
       title: "Get traffic overview",
       description:
-        "Headline stats for a site and period: unique visitors, pageviews, average visit duration (seconds), bounce rate (%), each with the %-change vs the previous period of the same length.",
+        "Headline stats for a site and period: unique visitors, pageviews, sessions, avgDuration = average visit (session) duration in seconds (each session capped at 4 h), avgTimeOnPage = average time on page in seconds (each pageview capped at 30 min), bounce rate (% of single-page sessions), each headline with the %-change vs the immediately preceding period of the same length.",
       inputSchema: {
         site_id: siteIdParam,
         ...dateRangeParams,
@@ -120,7 +120,7 @@ export function registerAnalyticsTools(server: McpServer) {
     {
       title: "Get breakdown by dimension",
       description:
-        "Top-N breakdown of traffic by one dimension: pages, entry_pages, exit_pages, exit_rates, sources (referrers), source_quality (bounce/duration per source), campaigns (UTM), devices, browsers, countries, events (custom events), or connection_types.",
+        "Top-N breakdown of traffic by one dimension: pages (by path, query string stripped), entry_pages, exit_pages, exit_rates, sources (normalised per-session traffic source — Google, Bing, Direct, ChatGPT, example.com, \"Google (paid)\" …; share is of all sessions), source_quality (bounce/duration per source), campaigns (any UTM-tagged sessions), devices and browsers (unique visitors), countries, events (custom events), or connection_types.",
       inputSchema: {
         site_id: siteIdParam,
         dimension: z.enum(DIMENSIONS).describe("Which dimension to break traffic down by."),
@@ -298,7 +298,7 @@ export function registerAnalyticsTools(server: McpServer) {
     {
       title: "Get SEO overview",
       description:
-        "Organic search traffic report: organic visitors/pageviews, top search engines, top landing pages from search, and the organic-traffic timeseries.",
+        "Organic search report built from sessions: organicSessions (sessions whose entry source is a search engine — the closest analogue to Google Search Console / Bing Webmaster clicks; paid clicks, AI assistants and webmail are excluded), organicVisitors (distinct daily visitor ids), organicPageviews (pageviews within organic sessions), paidSearchSessions, top engines, the raw referrer hosts behind each engine (e.g. www.bing.com vs cn.bing.com), organic landing pages (session entry page, path only), and a daily timeseries. Pass timezone \"America/Los_Angeles\" and complete days to line up with GSC.",
       inputSchema: {
         site_id: siteIdParam,
         ...dateRangeParams,

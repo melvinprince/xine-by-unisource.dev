@@ -77,13 +77,27 @@ export interface AnalyticsEvent {
 export interface DateRange {
   from: Date;
   to: Date;
+  /**
+   * IANA timezone the range is reported in (e.g. "Europe/Berlin"). Day/hour
+   * buckets and date-only bounds are computed in this zone. Always passed
+   * through normalizeTimeZone() before reaching SQL; absent means UTC.
+   */
+  tz?: string;
 }
 
 /** Overview stat card data */
 export interface OverviewStats {
   visitors: number;
   pageviews: number;
+  /**
+   * Average visit (session) duration in seconds:
+   * AVG(LEAST(sessions.total_duration, 4h)) over the sessions in range.
+   */
   avgDuration: number;
+  /** Average time on page in seconds: AVG(LEAST(pageviews.duration, 30 min)). */
+  avgTimeOnPage: number;
+  /** Sessions started in range (the unit bounce rate and avgDuration are over). */
+  sessions: number;
   bounceRate: number;
   visitorsChange: number;
   pageviewsChange: number;
@@ -109,20 +123,25 @@ export interface TopPage {
 
 /** Top referrer/source entry */
 export interface TopSource {
+  /** Normalised source name ("Google", "Bing", "Direct", "example.com", ...). */
   referrer: string;
+  /** Channel: search | paid | ai | social | email | referral | direct | internal */
+  channel?: string;
   visitors: number;
+  sessions?: number;
+  /** Share of all sessions in range (Direct included, so rows sum to ~100). */
   percentage: number;
   siteIds?: string[];
 }
 
-/** Device type breakdown */
+/** Device type breakdown (unique visitors per device type) */
 export interface DeviceBreakdown {
   desktop: number;
   mobile: number;
   tablet: number;
 }
 
-/** Browser usage entry */
+/** Browser usage entry (count = unique visitors) */
 export interface BrowserStat {
   browser: string;
   count: number;

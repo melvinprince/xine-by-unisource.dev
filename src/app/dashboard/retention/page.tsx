@@ -102,7 +102,7 @@ export default function RetentionPage() {
                 return (
                   <tr key={week} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
                     <td style={{ padding: '0.75rem 1rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-                      {format(new Date(week), "MMM d, yyyy")}
+                      {format(new Date(`${week.slice(0, 10)}T00:00:00`), "MMM d, yyyy")}
                     </td>
                     <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
                       {total.toLocaleString()}

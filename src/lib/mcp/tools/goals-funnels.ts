@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import { funnels, goalConversions, goals, sessions } from "@/lib/db/schema";
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { clearGoalsCache } from "@/lib/goals-cache";
+import { buildDateExpr } from "@/lib/query-helpers";
 import type { DateRange } from "@/lib/types";
 import { requireSiteAccess, resolveSiteScope, toolError } from "../auth";
 import {
@@ -441,6 +442,7 @@ export function registerGoalFunnelTools(server: McpServer) {
         lte(goalConversions.created_at, dateRange.to),
         ...(args.goal_id ? [eq(goalConversions.goal_id, args.goal_id)] : [])
       );
+      const dayExpr = buildDateExpr(dateRange, goalConversions.created_at, "day");
 
       const [records, byGoal, dailyTrend, totalRes] = await Promise.all([
         db
@@ -470,20 +472,21 @@ export function registerGoalFunnelTools(server: McpServer) {
           .where(where)
           .groupBy(goalConversions.goal_id, goals.name)
           .orderBy(sql`COUNT(*) DESC`),
+        // Calendar days in the requested timezone (default UTC).
         db
           .select({
-            day: sql<string>`DATE_TRUNC('day', ${goalConversions.created_at})`,
+            day: dayExpr,
             conversions: sql<number>`COUNT(*)::int`,
           })
           .from(goalConversions)
           .where(where)
-          .groupBy(sql`DATE_TRUNC('day', ${goalConversions.created_at})`)
-          .orderBy(sql`DATE_TRUNC('day', ${goalConversions.created_at})`),
+          .groupBy(dayExpr)
+          .orderBy(dayExpr),
         db.select({ total: sql<number>`COUNT(*)::int` }).from(goalConversions).where(where),
       ]);
 
       return ok({
-        period: { from: dateRange.from, to: dateRange.to },
+        period: { from: dateRange.from, to: dateRange.to, timezone: dateRange.tz ?? "UTC" },
         total: totalRes[0]?.total ?? 0,
         returned: records.length,
         byGoal,

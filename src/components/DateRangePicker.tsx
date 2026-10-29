@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { gsap } from 'gsap';
 import { Calendar, ChevronDown } from 'lucide-react';
+import { getLastNDaysRange } from './DashboardContext';
 
 interface DateRangePickerProps {
   onChange?: (range: { from: string; to: string; label: string }) => void;
@@ -21,32 +22,20 @@ const presets = [
 ];
 
 function getDateRange(preset: typeof presets[0]) {
-  const to = new Date();
-  const from = new Date();
-
   if ('hours' in preset && preset.hours) {
-    // Hour-based: pass full ISO timestamp to preserve the exact time window
-    from.setHours(from.getHours() - preset.hours);
+    // Hour-based: rolling window ending now, as full ISO timestamps
+    const to = new Date();
+    const from = new Date(to.getTime() - preset.hours * 60 * 60 * 1000);
     return {
       from: from.toISOString(),
       to: to.toISOString(),
     };
-  } else if ('days' in preset) {
-    // Day-based: add 1 day to 'to' so today's data is always included
-    to.setDate(to.getDate() + 1);
-    from.setDate(from.getDate() - (preset.days || 0));
-    return {
-      from: from.toISOString().split('T')[0],
-      to: to.toISOString().split('T')[0],
-    };
   }
 
-  // Fallback
-  to.setDate(to.getDate() + 1);
-  return {
-    from: from.toISOString().split('T')[0],
-    to: to.toISOString().split('T')[0],
-  };
+  // Day-based: N calendar days in the viewer's timezone ending today
+  // ("Today" = 1 day). See getLastNDaysRange.
+  const days = 'days' in preset ? preset.days || 0 : 0;
+  return getLastNDaysRange(Math.max(days, 1));
 }
 
 export default function DateRangePicker({ onChange, value }: DateRangePickerProps) {

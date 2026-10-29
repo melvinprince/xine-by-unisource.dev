@@ -39,11 +39,11 @@ const KNOWN_TABLES = [
 const TABLE_NOTES: Record<string, string> = {
   sites: "One row per tracked website. api_key is the public tracking key; server_api_key is for the /api/v1 API.",
   pageviews:
-    "One row per page view. Bot traffic is flagged, not deleted — add is_bot = false to match the dashboard. duration and ttfb are in seconds and milliseconds respectively.",
+    "One row per page view. Bot traffic is flagged, not deleted — add is_bot = false to match the dashboard. duration (engaged seconds on the page) and ttfb (ms); older rows can hold wall-clock time for idle tabs, so the dashboard averages LEAST(duration, 1800). url is pathname + query string; group by split_part(url, '?', 1) for pages.",
   events:
     "One row per custom/auto event (web vitals, scroll depth, clicks, JS errors...). The payload lives in the jsonb properties column; filter it with properties->>'key'.",
   sessions:
-    "Pre-aggregated visit summaries keyed by the tracker's session id. is_bounce marks single-page visits; total_duration is in seconds.",
+    "Pre-aggregated visit summaries keyed by the tracker's session id. is_bounce marks single-page visits; total_duration is in seconds (the dashboard averages LEAST(total_duration, 14400)). referrer/utm_* are the entry (first-touch) values — attribute traffic sources from this table, not pageviews.",
   site_settings: "Per-site tracking feature flags, stored as a jsonb features object.",
   goals: "Goal definitions. type is pageview | event | duration; condition is equals | contains | starts_with | greater_than.",
   goal_conversions: "One row per goal conversion, deduplicated per session.",

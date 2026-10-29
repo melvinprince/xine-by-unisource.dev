@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, BarChart3 } from "lucide-react";
+import { Search, BarChart3, Users, MousePointerClick } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import VisitorChart from "@/components/charts/VisitorChart";
 import DataTable from "@/components/DataTable";
@@ -12,11 +12,16 @@ import { useDashboardContext } from "@/components/DashboardContext";
 import { useDashboardFetch } from "@/hooks/use-dashboard-data";
 
 interface SEOData {
+  /** Sessions whose entry source is organic search — the GSC/BWT "clicks" analogue. */
+  organicSessions: number;
   organicVisitors: number;
   organicPageviews: number;
-  timeseries: import('@/lib/types').TimeseriesPoint[];
-  topEngines: { engine: string; visitors: number; views: number }[];
-  topLandingPages: { url: string; visitors: number }[];
+  organicBounceRate: number;
+  paidSearchSessions: number;
+  timeseries: (import('@/lib/types').TimeseriesPoint & { sessions: number })[];
+  topEngines: { engine: string; sessions: number; visitors: number; views: number }[];
+  engineHosts: { engine: string; host: string; sessions: number }[];
+  topLandingPages: { url: string; entrances: number; visitors: number }[];
 }
 
 export default function SEOOverviewPage() {
@@ -31,7 +36,7 @@ export default function SEOOverviewPage() {
   if (loading) return <LoadingState message="Analyzing search traffic..." />;
   if (error) return <ErrorState message={error} onRetry={refetch} />;
   
-  const hasData = data && (data.organicPageviews > 0 || data.organicVisitors > 0);
+  const hasData = data && (data.organicSessions > 0 || data.organicPageviews > 0);
   
   if (!hasData) return (
     <EmptyState
@@ -45,7 +50,7 @@ export default function SEOOverviewPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <PageHeader
         title="SEO"
-        description="Organic search traffic and landing page performance"
+        description="Organic search visits by engine and landing page (paid search excluded)"
         icon={<Search size={20} />}
       />
 
@@ -57,14 +62,31 @@ export default function SEOOverviewPage() {
           gap: '1rem',
         }}
       >
-        <StatCard label="Organic Visitors" value={data.organicVisitors} icon={<Search size={20} />} delay={0.1} />
-        <StatCard label="Organic Pageviews" value={data.organicPageviews} icon={<BarChart3 size={20} />} delay={0.2} />
+        <StatCard
+          label={<>Organic Visits <HelpTooltip title="Organic Visits" content="Visits (sessions) that started from a search engine results page — the closest equivalent to Clicks in Google Search Console and Bing Webmaster Tools. Paid clicks (gclid/msclkid, utm_medium=cpc), AI assistants and webmail are excluded. To compare with GSC, choose complete days; GSC reports days in Pacific Time." /></>}
+          value={data.organicSessions}
+          icon={<MousePointerClick size={20} />}
+          delay={0.1}
+        />
+        <StatCard
+          label={<>Unique Visitors (daily) <HelpTooltip title="Unique Visitors" content="Distinct visitor IDs among organic visits. IDs are a privacy-preserving daily hash, so the same person on two days counts twice and two searches on one day count once." /></>}
+          value={data.organicVisitors}
+          icon={<Users size={20} />}
+          delay={0.15}
+        />
+        <StatCard label="Pageviews in Organic Visits" value={data.organicPageviews} icon={<BarChart3 size={20} />} delay={0.2} />
+        <StatCard
+          label={<>Paid Search Visits <HelpTooltip title="Paid Search Visits" content="Visits from search ads (gclid/gbraid/wbraid/msclkid or utm_medium=cpc/ppc/paid). Shown for reference; not counted as organic." /></>}
+          value={data.paidSearchSessions}
+          icon={<Search size={20} />}
+          delay={0.25}
+        />
       </div>
 
       {/* Visitor Trend Chart */}
       <div className="glass-card" style={{ padding: '1.5rem' }}>
         <SectionHeader title="Organic Traffic Trend" />
-        <VisitorChart data={data.timeseries} annotations={[]} />
+        <VisitorChart data={data.timeseries} annotations={[]} primaryDataKey="sessions" primaryLabel="Organic visits" />
       </div>
 
       {/* Tables */}
@@ -87,6 +109,12 @@ export default function SEOOverviewPage() {
                 render: (v) => (
                   <span style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>{String(v)}</span>
                 ),
+              },
+              {
+                key: 'sessions',
+                label: 'Organic Visits',
+                align: 'right',
+                render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Number(v).toLocaleString()}</span>,
               },
               {
                 key: 'visitors',
@@ -115,13 +143,44 @@ export default function SEOOverviewPage() {
                 ),
               },
               {
+                key: 'entrances',
+                label: 'Entrances (visits)',
+                align: 'right',
+                render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Number(v).toLocaleString()}</span>,
+              },
+              {
                 key: 'visitors',
-                label: 'Organic Entrances',
+                label: 'Visitors',
                 align: 'right',
                 render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Number(v).toLocaleString()}</span>,
               },
             ]}
             data={data.topLandingPages}
+          />
+          <DataTable
+            title="Search Referrer Hosts"
+            delay={0.6}
+            columns={[
+              {
+                key: 'host',
+                label: 'Referrer Host',
+                render: (v) => (
+                  <span style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>{String(v)}</span>
+                ),
+              },
+              {
+                key: 'engine',
+                label: 'Engine',
+                render: (v) => <span style={{ color: 'var(--color-text-secondary)' }}>{String(v)}</span>,
+              },
+              {
+                key: 'sessions',
+                label: 'Organic Visits',
+                align: 'right',
+                render: (v) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Number(v).toLocaleString()}</span>,
+              },
+            ]}
+            data={data.engineHosts}
           />
         </div>
       </div>

@@ -23,7 +23,10 @@ export async function GET(request: NextRequest) {
   const targetSiteId = siteId === "all" ? await getUserAccessibleSiteIds(userId) : siteId;
 
     // 2. Parse date range
-    let dateRange = parseDateRange(fromStr, toStr);
+    // parseDateRange only returns null for unparseable from/to; with neither
+    // given it applies the preset, so forward `range` instead of letting it
+    // silently default to 30d.
+    let dateRange = parseDateRange(fromStr, toStr, searchParams.get("range"), searchParams.get("tz"));
 
     if (!dateRange) {
       // Fallback: Support both presets (24h, 7d, 30d) and timestamp ranges (from-to)

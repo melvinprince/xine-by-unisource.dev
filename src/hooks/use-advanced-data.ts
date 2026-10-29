@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { ActiveFilters } from '@/components/DashboardContext';
+import { getViewerTimeZone, type ActiveFilters } from '@/components/DashboardContext';
 import type {
   SessionAnalytics,
   NewVsReturning,
@@ -56,7 +56,8 @@ function useFetchData<T>(url: string | null, deps: unknown[] = []) {
 }
 
 function buildParams(siteId: string, dateRange: { from: string; to: string }, filters?: ActiveFilters) {
-  const params = new URLSearchParams({ siteId, from: dateRange.from, to: dateRange.to });
+  // tz: viewer timezone for day/hour buckets (validated server-side).
+  const params = new URLSearchParams({ siteId, from: dateRange.from, to: dateRange.to, tz: getViewerTimeZone() });
   if (filters) {
     Object.entries(filters).forEach(([key, values]) => {
       if (values && values.length > 0) {

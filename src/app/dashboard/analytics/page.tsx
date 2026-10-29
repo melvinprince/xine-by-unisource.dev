@@ -78,7 +78,7 @@ export default function AnalyticsPage() {
           format="decimal"
         />
         <StatCard
-          label={<>Avg. Session Duration <HelpTooltip title="Session Duration" content="Average time a visitor spends on your site in a single session." /></>}
+          label={<>Avg. Visit Duration <HelpTooltip title="Visit Duration" content="Average engaged time per visit (session), summed across its pages. Each visit is capped at 4 hours so tabs left open don't distort the average — the same figure as the Overview card." /></>}
           value={sessionStats.avgSessionDuration}
           change={sessionStats.sessionDurationChange}
           icon={<Clock size={20} />}
@@ -86,7 +86,7 @@ export default function AnalyticsPage() {
           format="duration"
         />
         <StatCard
-          label={<>New Visitors <HelpTooltip title="New Visitors" content="Percentage of visitors who are visiting your site for the first time in this period." /></>}
+          label={<>New Visitors <HelpTooltip title="New Visitors" content="Share of this period's visitors with no earlier visit on record. Visitor IDs are a privacy-preserving hash that rotates daily, so repeat visitors on different days count as new." /></>}
           value={sessionStats.newVisitorPercent}
           icon={<Users size={20} />}
           delay={0.25}
@@ -128,8 +128,12 @@ export default function AnalyticsPage() {
               stroke="var(--color-text-muted)"
               fontSize={11}
               tickFormatter={(v) => {
-                const d = new Date(v);
-                return `${d.getMonth() + 1}/${d.getDate()}`;
+                // Buckets are already local calendar days ("YYYY-MM-DD" or
+                // "YYYY-MM-DD HH:00" in the viewer's tz). Read the parts
+                // directly: new Date("YYYY-MM-DD") is UTC midnight and shows
+                // the previous day west of Greenwich.
+                const [, m, d] = String(v).slice(0, 10).split('-');
+                return `${Number(m)}/${Number(d)}`;
               }}
             />
             <YAxis stroke="var(--color-text-muted)" fontSize={11} />

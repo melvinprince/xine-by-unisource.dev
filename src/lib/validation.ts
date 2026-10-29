@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidHostname } from "@/lib/bot-detection";
 
 // Common validators
 export const uuidSchema = z.string().uuid();
@@ -9,15 +10,44 @@ export const dateRangeSchema = z.object({
   to: dateStringSchema,
 }).refine((d) => new Date(d.from) <= new Date(d.to), "from must be before to");
 
+/**
+ * Reduce whatever was typed into the domain field to a bare hostname:
+ * trimmed, lowercased, scheme/port/path/trailing dot stripped, leading "www."
+ * dropped. Returns "" when the result is not a valid hostname.
+ *
+ * The stored domain is compared against every collect request's Origin, so a
+ * malformed value (the old regex accepted "fixingenvironment..com") silently
+ * puts a heavy bot signal on all of that site's traffic.
+ */
+export function normalizeSiteDomain(input: string): string {
+  const raw = input.trim().toLowerCase();
+  if (!raw) return "";
+  let host: string;
+  try {
+    host = new URL(raw.includes("://") ? raw : "https://" + raw).hostname;
+  } catch {
+    return "";
+  }
+  host = host.replace(/\.$/, "").replace(/^www\./, "");
+  return isValidHostname(host) ? host : "";
+}
+
+const siteDomainSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .transform(normalizeSiteDomain)
+  .refine((d) => d !== "", "Invalid domain: expected a hostname such as example.com");
+
 // Site creation/update
 export const createSiteSchema = z.object({
   name: z.string().min(1).max(256),
-  domain: z.string().min(1).max(512).url().or(z.string().regex(/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)),
+  domain: siteDomainSchema,
 });
 
 export const updateSiteSchema = z.object({
   name: z.string().min(1).max(256).optional(),
-  domain: z.string().min(1).max(512).url().or(z.string().regex(/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)).optional(),
+  domain: siteDomainSchema.optional(),
   is_public: z.boolean().optional(),
   api_access_enabled: z.boolean().optional(),
 });

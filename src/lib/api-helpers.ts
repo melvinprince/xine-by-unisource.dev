@@ -2,44 +2,79 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sites, userSites } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import { normalizeTimeZone, zonedMidnightToUtc } from "@/lib/query-helpers";
+import type { DateRange } from "@/lib/types";
 
 export interface ParsedParams {
   siteId: string;
   dateRange: { from: Date; to: Date };
 }
 
-export function parseDateRange(from: string | null, to: string | null, rangePreset?: string | null): { from: Date; to: Date } | null {
-  const toDate = to ? new Date(Number(to) || to) : new Date();
+/**
+ * Parse a from/to pair (or a relative preset) into a DateRange.
+ *
+ * - Full timestamps (ISO with a time part, or epoch ms) are used as-is.
+ *   The dashboard sends these for every preset.
+ * - Date-only strings ("2026-10-01", from the MCP tools, the v1 API and
+ *   chart day-clicks) are calendar days in `tz`: `from` is local midnight
+ *   and `to` is the end of that day (next local midnight − 1 ms). Both are
+ *   read in the same zone — previously `from` was UTC midnight while `to`
+ *   was extended with server-local setHours.
+ * - Presets ("7d", "24h", …) are rolling windows ending now, so "7d" is
+ *   exactly 7 × 24 h, not 8 calendar days.
+ *
+ * `tz` is validated (unknown zones fall back to UTC) and carried on the
+ * result so day buckets downstream use the same zone.
+ */
+export function parseDateRange(
+  from: string | null,
+  to: string | null,
+  rangePreset?: string | null,
+  tz?: string | null
+): DateRange | null {
+  const zone = normalizeTimeZone(tz);
+  const now = new Date();
+
+  const parseBound = (value: string, edge: "start" | "end"): Date => {
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+    if (dateOnly) {
+      const [, y, m, d] = dateOnly.map(Number);
+      if (edge === "start") return zonedMidnightToUtc(y, m, d, zone);
+      return new Date(zonedMidnightToUtc(y, m, d + 1, zone).getTime() - 1);
+    }
+    return new Date(Number(value) || value);
+  };
+
+  const toDate = to ? parseBound(to, "end") : now;
   let fromDate: Date;
 
   if (from) {
-    fromDate = new Date(Number(from) || from);
+    fromDate = parseBound(from, "start");
   } else {
-    fromDate = new Date();
     const preset = rangePreset || "30d";
-    switch (preset) {
-      case "1h": fromDate.setHours(fromDate.getHours() - 1); break;
-      case "3h": fromDate.setHours(fromDate.getHours() - 3); break;
-      case "12h": fromDate.setHours(fromDate.getHours() - 12); break;
-      case "24h": fromDate.setHours(fromDate.getHours() - 24); break;
-      case "7d": fromDate.setDate(fromDate.getDate() - 7); break;
-      case "90d": fromDate.setDate(fromDate.getDate() - 90); break;
-      case "30d":
-      default:
-        fromDate.setDate(fromDate.getDate() - 30);
-        break;
-    }
+    const HOUR = 60 * 60 * 1000;
+    const DAY = 24 * HOUR;
+    const spans: Record<string, number> = {
+      "1h": HOUR,
+      "3h": 3 * HOUR,
+      "12h": 12 * HOUR,
+      "24h": DAY,
+      "7d": 7 * DAY,
+      "30d": 30 * DAY,
+      "90d": 90 * DAY,
+    };
+    fromDate = new Date(toDate.getTime() - (spans[preset] ?? spans["30d"]));
   }
 
   if (isNaN(toDate.getTime()) || isNaN(fromDate.getTime())) return null;
   if (fromDate > toDate) return null;
 
-  // Extend date-only strings to end of day if it does not contain time
-  if (to && typeof to === "string" && !to.includes("T") && !to.includes(":") && isNaN(Number(to))) {
-    toDate.setHours(23, 59, 59, 999);
-  }
+  return { from: fromDate, to: toDate, tz: zone };
+}
 
-  return { from: fromDate, to: toDate };
+/** Read the viewer's timezone (`tz` query param) from a request's search params. */
+export function parseTimeZoneParam(searchParams: URLSearchParams): string {
+  return normalizeTimeZone(searchParams.get("tz"));
 }
 
 export function getUserFromRequest(request: NextRequest): string | null {

@@ -275,6 +275,11 @@ DB_NAME=analytics_db
 
 # Dashboard Authentication
 DASHBOARD_PASSWORD=your_secure_password
+
+# Which edge header the collect route trusts for visitor country/city:
+# cloudflare (cf-ipcountry) | vercel | cloudfront | fly.
+# Defaults to vercel when VERCEL is set, otherwise cloudflare.
+# GEO_HEADER_SOURCE=cloudflare
 ```
 
 ---

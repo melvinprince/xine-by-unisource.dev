@@ -7,9 +7,21 @@
 
 import { db } from "./db";
 import { pageviews, events, sessions } from "./db/schema";
-import { eq, gte, lte, ne, and, sql, desc, inArray, or, isNull } from "drizzle-orm";
-import { subDays, subMinutes, differenceInDays } from "date-fns";
-import { buildDateExpr } from "./query-helpers";
+import { eq, gte, lte, ne, and, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import { subMinutes } from "date-fns";
+import {
+  buildDateExpr,
+  buildDimensionConditions,
+  cappedPageDuration,
+  cappedSessionDuration,
+  getPreviousDateRange,
+  localTimestamp,
+  pagePathSql,
+  sessionSourceClassifier,
+  siteScopeSql,
+  tzLiteral,
+} from "./query-helpers";
 import { filterStore } from "./filter-store";
 import type { DimensionFilters } from "./api-helpers";
 import type {
@@ -38,14 +50,6 @@ import type {
 
 // ---- Helpers ----
 
-function getPreviousDateRange(dateRange: DateRange): DateRange {
-  const days = differenceInDays(dateRange.to, dateRange.from);
-  return {
-    from: subDays(dateRange.from, days),
-    to: dateRange.from,
-  };
-}
-
 function calcChange(current: number, previous: number): number {
   if (previous === 0) return current > 0 ? 100 : 0;
   return Math.round(((current - previous) / previous) * 100);
@@ -60,99 +64,74 @@ function countryFlag(code: string): string {
   return String.fromCodePoint(...codePoints);
 }
 
-function applyDimensionFilters(
-  conditions: any[],
-  table: typeof pageviews | typeof events | typeof sessions,
-  filters?: DimensionFilters
-) {
-  const activeFilters = filters || filterStore.getStore();
-  if (!activeFilters) return;
-
-  if (activeFilters.countries && activeFilters.countries.length > 0 && "country" in table) {
-    conditions.push(inArray((table as any).country, activeFilters.countries)!);
-  }
-  if (activeFilters.browsers && activeFilters.browsers.length > 0 && "browser" in table) {
-    conditions.push(inArray((table as any).browser, activeFilters.browsers)!);
-  }
-  if (activeFilters.devices && activeFilters.devices.length > 0 && "device" in table) {
-    const deviceList = activeFilters.devices;
-    const hasDesktop = deviceList.includes("desktop");
-    if (hasDesktop) {
-      conditions.push(
-        or(
-          inArray(sql`LOWER(${(table as any).device})`, deviceList)!,
-          isNull((table as any).device)
-        )!
-      );
-    } else {
-      conditions.push(inArray(sql`LOWER(${(table as any).device})`, deviceList)!);
-    }
-  }
-  if (activeFilters.sources && activeFilters.sources.length > 0 && "referrer" in table) {
-    const extractedHostExpr = sql<string>`
-      CASE 
-        WHEN ${(table as any).referrer} ~ '^https?://' 
-        THEN regexp_replace(${(table as any).referrer}, '^https?://([^/]+).*$', '\\1')
-        ELSE ${(table as any).referrer}
-      END
-    `;
-    conditions.push(inArray(extractedHostExpr, activeFilters.sources)!);
-  }
-  if (activeFilters.pages && activeFilters.pages.length > 0) {
-    if ("url" in table) {
-      conditions.push(inArray((table as any).url, activeFilters.pages)!);
-    } else if ("entry_page" in table) {
-      conditions.push(inArray((table as any).entry_page, activeFilters.pages)!);
-    }
-  }
-}
-
-function buildSessionFilters(siteId: string | string[], dateRange: DateRange, filters?: DimensionFilters) {
-  const conditions = [
+/**
+ * Row conditions for the sessions table: start time in range, site scope,
+ * bots excluded, plus the shared dimension filters (see
+ * buildDimensionConditions for what each filter means). Exported so the
+ * overview, sources and retention queries use exactly the same scoping.
+ */
+export function buildSessionFilters(siteId: string | string[], dateRange: DateRange, filters?: DimensionFilters) {
+  const conditions: SQL[] = [
     gte(sessions.started_at, dateRange.from),
     lte(sessions.started_at, dateRange.to),
     eq(sessions.is_bot, false),
+    siteScopeSql(sessions.site_id, siteId),
+    ...buildDimensionConditions(sessions, siteId, dateRange, filters || filterStore.getStore()),
   ];
-  if (Array.isArray(siteId)) {
-    if (siteId.length > 0) conditions.push(inArray(sessions.site_id, siteId));
-    else conditions.push(sql`1 = 0`);
-  } else if (siteId !== "all") {
-    conditions.push(eq(sessions.site_id, siteId));
-  }
-  applyDimensionFilters(conditions, sessions, filters);
   return and(...conditions);
 }
 
 function buildEventFilters(siteId: string | string[], dateRange: DateRange, filters?: DimensionFilters) {
-  const conditions = [
+  const conditions: SQL[] = [
     gte(events.created_at, dateRange.from),
     lte(events.created_at, dateRange.to),
     eq(events.is_bot, false),
+    siteScopeSql(events.site_id, siteId),
+    ...buildDimensionConditions(events, siteId, dateRange, filters || filterStore.getStore()),
   ];
-  if (Array.isArray(siteId)) {
-    if (siteId.length > 0) conditions.push(inArray(events.site_id, siteId));
-    else conditions.push(sql`1 = 0`);
-  } else if (siteId !== "all") {
-    conditions.push(eq(events.site_id, siteId));
-  }
-  applyDimensionFilters(conditions, events, filters);
   return and(...conditions);
 }
 
 function buildPageviewFilters(siteId: string | string[], dateRange: DateRange, filters?: DimensionFilters) {
-  const conditions = [
+  const conditions: SQL[] = [
     gte(pageviews.created_at, dateRange.from),
     lte(pageviews.created_at, dateRange.to),
     eq(pageviews.is_bot, false),
+    siteScopeSql(pageviews.site_id, siteId),
+    ...buildDimensionConditions(pageviews, siteId, dateRange, filters || filterStore.getStore()),
   ];
-  if (Array.isArray(siteId)) {
-    if (siteId.length > 0) conditions.push(inArray(pageviews.site_id, siteId));
-    else conditions.push(sql`1 = 0`);
-  } else if (siteId !== "all") {
-    conditions.push(eq(pageviews.site_id, siteId));
-  }
-  applyDimensionFilters(conditions, pageviews, filters);
   return and(...conditions);
+}
+
+/**
+ * Distinct visitors in range who had no (human) session on the same site
+ * scope before the range started.
+ *
+ * The lookback subquery used to interpolate siteId as a scalar
+ * (`s2.site_id = ${siteId}`); the dashboard passes an array for "All
+ * sites", which rendered `uuid = ($1, $2)` and failed the whole Analytics
+ * page with a 500. It also counted bot sessions as prior visits.
+ */
+async function countNewVisitors(siteId: string | string[], range: DateRange): Promise<number> {
+  const s2 = alias(sessions, "s2");
+  const [row] = await db
+    .select({
+      newCount: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
+    })
+    .from(sessions)
+    .where(
+      and(
+        buildSessionFilters(siteId, range),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${sessions} AS ${s2}
+          WHERE ${s2.visitor_id} = ${sessions.visitor_id}
+            AND ${s2.started_at} < ${range.from}
+            AND ${s2.is_bot} = false
+            AND ${siteScopeSql(s2.site_id, siteId)}
+        )`
+      )
+    );
+  return row?.newCount || 0;
 }
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -190,7 +169,8 @@ export async function getSessionAnalytics(
     .select({
       totalSessions: sql<number>`COUNT(*)::int`,
       avgPages: sql<number>`COALESCE(ROUND(AVG(${sessions.page_count})::numeric, 1), 0)::float`,
-      avgDuration: sql<number>`COALESCE(ROUND(AVG(${sessions.total_duration})), 0)::int`,
+      // Visit duration, capped per session at 4 h (see cappedSessionDuration).
+      avgDuration: sql<number>`COALESCE(ROUND(AVG(${cappedSessionDuration(sessions.total_duration)})), 0)::int`,
     })
     .from(sessions)
     .where(buildSessionFilters(siteId, range));
@@ -202,33 +182,16 @@ export async function getSessionAnalytics(
     .from(sessions)
     .where(buildSessionFilters(siteId, range));
 
-  const newVisitorsQuery = (range: DateRange) => db
-    .select({
-      newCount: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
-    })
-    .from(sessions)
-    .where(
-      and(
-        buildSessionFilters(siteId, range),
-        sql`NOT EXISTS (
-          SELECT 1 FROM ${sessions} s2 
-          WHERE s2.visitor_id = ${sessions.visitor_id} 
-            AND s2.started_at < ${range.from}
-            ${siteId !== 'all' ? sql`AND s2.site_id = ${siteId}` : sql``}
-        )`
-      )
-    );
-
   const [
     [current],
     [prev],
     [currentVisitors],
-    [currentNew]
+    newVisitors
   ] = await Promise.all([
     statsQuery(dateRange),
     statsQuery(prevRange),
     visitorsQuery(dateRange),
-    newVisitorsQuery(dateRange)
+    countNewVisitors(siteId, dateRange)
   ]);
 
   const totalSessions = current.totalSessions || 0;
@@ -239,7 +202,6 @@ export async function getSessionAnalytics(
   const prevAvgDuration = prev.avgDuration || 0;
 
   const totalVisitors = currentVisitors.total || 0;
-  const newVisitors = currentNew.newCount || 0;
   const newPct = totalVisitors > 0 ? Math.round((newVisitors / totalVisitors) * 100) : 0;
 
   return {
@@ -265,25 +227,8 @@ export async function getNewVsReturning(
     .from(sessions)
     .where(buildSessionFilters(siteId, dateRange));
 
-  const newQuery = await db
-    .select({
-      newCount: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
-    })
-    .from(sessions)
-    .where(
-      and(
-        buildSessionFilters(siteId, dateRange),
-        sql`NOT EXISTS (
-          SELECT 1 FROM ${sessions} s2 
-          WHERE s2.visitor_id = ${sessions.visitor_id} 
-            AND s2.started_at < ${dateRange.from}
-            ${siteId !== 'all' ? sql`AND s2.site_id = ${siteId}` : sql``}
-        )`
-      )
-    );
-
   const total = totalQuery[0]?.total || 0;
-  const newV = newQuery[0]?.newCount || 0;
+  const newV = Math.min(await countNewVisitors(siteId, dateRange), total);
   const retV = total - newV;
   const newPercent = total > 0 ? Math.round((newV / total) * 100) : 0;
 
@@ -347,6 +292,17 @@ export async function getEngagementMetrics(
     .leftJoin(scrollSub, eq(sessions.id, scrollSub.session_id))
     .where(buildSessionFilters(siteId, dateRange));
 
+  // Time on page: AVG(LEAST(pageviews.duration, 30 min)) — the same
+  // definition as the overview. It used to be SUM(total_duration) /
+  // SUM(page_count), which mixed the longest page per session with a
+  // per-page denominator.
+  const [timeOnPage] = await db
+    .select({
+      avg: sql<number>`COALESCE(ROUND(AVG(${cappedPageDuration(pageviews.duration)})), 0)::int`,
+    })
+    .from(pageviews)
+    .where(buildPageviewFilters(siteId, dateRange));
+
   if (rows.length === 0) {
     return {
       avgEngagementScore: 0,
@@ -364,8 +320,6 @@ export async function getEngagementMetrics(
   let lowCount = 0;
   let totalScrollDepth = 0;
   let scrollCount = 0;
-  let totalDuration = 0;
-  let totalPageviews = 0;
 
   rows.forEach((r) => {
     const score = r.score || 0;
@@ -378,8 +332,6 @@ export async function getEngagementMetrics(
       totalScrollDepth += r.scrollDepth;
       scrollCount++;
     }
-    totalDuration += r.total_duration;
-    totalPageviews += r.page_count;
   });
 
   return {
@@ -388,7 +340,7 @@ export async function getEngagementMetrics(
     moderatelyEngaged: midCount,
     lowEngagement: lowCount,
     avgScrollDepth: scrollCount > 0 ? Math.round(totalScrollDepth / scrollCount) : 0,
-    avgTimeOnPage: totalPageviews > 0 ? Math.round(totalDuration / totalPageviews) : 0,
+    avgTimeOnPage: timeOnPage?.avg || 0,
   };
 }
 
@@ -426,18 +378,19 @@ export async function getHourlyHeatmap(
   siteId: string | string[],
   dateRange: DateRange
 ): Promise<HeatmapCell[]> {
+  // Day-of-week / hour in the viewer's timezone, not the DB's UTC.
+  const local = localTimestamp(sessions.started_at, dateRange);
+  const dowExpr = sql<number>`EXTRACT(DOW FROM ${local})::int`;
+  const hourExpr = sql<number>`EXTRACT(HOUR FROM ${local})::int`;
   const rows = await db
     .select({
-      day: sql<number>`EXTRACT(DOW FROM ${sessions.started_at})::int`,
-      hour: sql<number>`EXTRACT(HOUR FROM ${sessions.started_at})::int`,
+      day: dowExpr,
+      hour: hourExpr,
       value: sql<number>`COUNT(*)::int`,
     })
     .from(sessions)
     .where(buildSessionFilters(siteId, dateRange))
-    .groupBy(
-      sql`EXTRACT(DOW FROM ${sessions.started_at})`,
-      sql`EXTRACT(HOUR FROM ${sessions.started_at})`
-    );
+    .groupBy(dowExpr, hourExpr);
 
   const grid = new Map<string, number>();
   rows.forEach((r) => {
@@ -462,14 +415,15 @@ export async function getPeakHours(
   siteId: string | string[],
   dateRange: DateRange
 ): Promise<PeakHour[]> {
+  const hourExpr = sql<number>`EXTRACT(HOUR FROM ${localTimestamp(sessions.started_at, dateRange)})::int`;
   const rows = await db
     .select({
-      hour: sql<number>`EXTRACT(HOUR FROM ${sessions.started_at})::int`,
+      hour: hourExpr,
       visitors: sql<number>`COUNT(*)::int`,
     })
     .from(sessions)
     .where(buildSessionFilters(siteId, dateRange))
-    .groupBy(sql`EXTRACT(HOUR FROM ${sessions.started_at})`)
+    .groupBy(hourExpr)
     .orderBy(sql`COUNT(*) DESC`)
     .limit(5);
 
@@ -489,14 +443,15 @@ export async function getEntryPages(
   dateRange: DateRange,
   limit = 10
 ): Promise<EntryExitPage[]> {
+  const entryPath = pagePathSql(sessions.entry_page);
   const rows = await db
     .select({
-      url: sessions.entry_page,
+      url: entryPath,
       count: sql<number>`COUNT(*)::int`,
     })
     .from(sessions)
     .where(buildSessionFilters(siteId, dateRange))
-    .groupBy(sessions.entry_page)
+    .groupBy(entryPath)
     .orderBy(sql`COUNT(*) DESC`)
     .limit(limit);
 
@@ -519,14 +474,15 @@ export async function getExitPages(
   dateRange: DateRange,
   limit = 10
 ): Promise<EntryExitPage[]> {
+  const exitPath = pagePathSql(sessions.exit_page);
   const rows = await db
     .select({
-      url: sessions.exit_page,
+      url: exitPath,
       count: sql<number>`COUNT(*)::int`,
     })
     .from(sessions)
     .where(buildSessionFilters(siteId, dateRange))
-    .groupBy(sessions.exit_page)
+    .groupBy(exitPath)
     .orderBy(sql`COUNT(*) DESC`)
     .limit(limit);
 
@@ -549,26 +505,29 @@ export async function getPageExitRates(
   dateRange: DateRange,
   limit = 10
 ): Promise<PageExitRate[]> {
+  // Both sides keyed by path so ?query variants of a page share one row.
+  const exitPath = pagePathSql(sessions.exit_page);
   const subExits = db
     .select({
-      exit_page: sessions.exit_page,
+      exit_page: sql<string>`${exitPath}`.as('exit_path'),
       exits: sql<number>`COUNT(*)::int`.as('exits'),
     })
     .from(sessions)
     .where(buildSessionFilters(siteId, dateRange))
-    .groupBy(sessions.exit_page)
+    .groupBy(exitPath)
     .as('sub_exits');
 
+  const viewPath = pagePathSql(pageviews.url);
   const rows = await db
     .select({
-      url: pageviews.url,
+      url: viewPath,
       views: sql<number>`COUNT(*)::int`,
       exits: sql<number>`COALESCE(${subExits.exits}, 0)::int`,
     })
     .from(pageviews)
-    .leftJoin(subExits, eq(pageviews.url, subExits.exit_page))
+    .leftJoin(subExits, sql`${viewPath} = ${subExits.exit_page}`)
     .where(buildPageviewFilters(siteId, dateRange))
-    .groupBy(pageviews.url, subExits.exits)
+    .groupBy(viewPath, subExits.exits)
     .orderBy(sql`COALESCE(${subExits.exits}, 0)::float / NULLIF(COUNT(*), 0) * 100 DESC`)
     .limit(limit);
 
@@ -592,8 +551,8 @@ export async function getUserFlows(
   const sub = db
     .select({
       session_id: pageviews.session_id,
-      url: pageviews.url,
-      prev_url: sql<string>`LAG(${pageviews.url}) OVER (PARTITION BY ${pageviews.session_id} ORDER BY ${pageviews.created_at})`.as('prev_url'),
+      url: sql<string>`${pagePathSql(pageviews.url)}`.as('url'),
+      prev_url: sql<string>`LAG(${pagePathSql(pageviews.url)}) OVER (PARTITION BY ${pageviews.session_id} ORDER BY ${pageviews.created_at})`.as('prev_url'),
     })
     .from(pageviews)
     .where(buildPageviewFilters(siteId, dateRange))
@@ -724,9 +683,10 @@ export async function getWebVitalsByPage(
   dateRange: DateRange,
   limit = 10
 ): Promise<PageWebVital[]> {
+  const eventPath = pagePathSql(events.url);
   const rows = await db
     .select({
-      url: events.url,
+      url: eventPath,
       lcp: sql<number>`ROUND(AVG((properties->>'value')::numeric) FILTER (WHERE LOWER(properties->>'metric') = 'lcp'))::int`,
       fcp: sql<number>`ROUND(AVG((properties->>'value')::numeric) FILTER (WHERE LOWER(properties->>'metric') = 'fcp'))::int`,
       cls: sql<number>`ROUND(AVG((properties->>'value')::numeric) FILTER (WHERE LOWER(properties->>'metric') = 'cls'))::int`,
@@ -734,16 +694,17 @@ export async function getWebVitalsByPage(
     })
     .from(events)
     .where(and(buildEventFilters(siteId, dateRange), eq(events.name, 'web_vital'), sql`${events.url} IS NOT NULL`))
-    .groupBy(events.url);
+    .groupBy(eventPath);
 
+  const ttfbPath = pagePathSql(pageviews.url);
   const ttfbRows = await db
     .select({
-      url: pageviews.url,
+      url: ttfbPath,
       ttfb: sql<number>`ROUND(AVG(${pageviews.ttfb}))::int`,
     })
     .from(pageviews)
     .where(and(buildPageviewFilters(siteId, dateRange), sql`${pageviews.ttfb} IS NOT NULL AND ${pageviews.ttfb} > 0`))
-    .groupBy(pageviews.url);
+    .groupBy(ttfbPath);
 
   const ttfbMap = new Map<string, number>();
   ttfbRows.forEach((r) => ttfbMap.set(r.url, r.ttfb));
@@ -822,26 +783,38 @@ export async function getCampaignPerformance(
   dateRange: DateRange,
   limit = 10
 ): Promise<CampaignPerformance[]> {
+  // NULL and '' both mean "not set"; group them together so a source/medium
+  // pair does not show up as two identical "(not set)" rows.
+  const campaignExpr = sql<string>`COALESCE(NULLIF(${sessions.utm_campaign}, ''), '(not set)')`;
+  const sourceExpr = sql<string>`COALESCE(NULLIF(${sessions.utm_source}, ''), '(not set)')`;
+  const mediumExpr = sql<string>`COALESCE(NULLIF(${sessions.utm_medium}, ''), '(not set)')`;
   const rows = await db
     .select({
-      campaign: sessions.utm_campaign,
-      source: sessions.utm_source,
-      medium: sessions.utm_medium,
+      campaign: campaignExpr,
+      source: sourceExpr,
+      medium: mediumExpr,
       sessions: sql<number>`COUNT(*)::int`,
       bounces: sql<number>`COUNT(*) FILTER (WHERE ${sessions.is_bounce} = true)::int`,
-      totalDuration: sql<number>`SUM(${sessions.total_duration})::int`,
+      totalDuration: sql<number>`SUM(${cappedSessionDuration(sessions.total_duration)})::int`,
       totalPages: sql<number>`SUM(${sessions.page_count})::int`,
     })
     .from(sessions)
-    .where(and(buildSessionFilters(siteId, dateRange), ne(sessions.utm_campaign, "")))
-    .groupBy(sessions.utm_campaign, sessions.utm_source, sessions.utm_medium)
+    // Any UTM-tagged session, not just ones with a campaign: ChatGPT and
+    // Copilot append ?utm_source=chatgpt.com with no campaign, and
+    // `utm_campaign <> ''` dropped 113 of 115 tagged sessions (and every
+    // NULL, since NULL <> '' is not true).
+    .where(and(
+      buildSessionFilters(siteId, dateRange),
+      sql`(COALESCE(${sessions.utm_source}, '') <> '' OR COALESCE(${sessions.utm_medium}, '') <> '' OR COALESCE(${sessions.utm_campaign}, '') <> '')`
+    ))
+    .groupBy(campaignExpr, sourceExpr, mediumExpr)
     .orderBy(sql`COUNT(*) DESC`)
     .limit(limit);
 
   return rows.map((r) => ({
-    campaign: r.campaign || "direct",
-    source: r.source || "",
-    medium: r.medium || "",
+    campaign: r.campaign || "(not set)",
+    source: r.source || "(not set)",
+    medium: r.medium || "(not set)",
     sessions: r.sessions,
     bounceRate: r.sessions > 0 ? Math.round((r.bounces / r.sessions) * 100) : 0,
     avgDuration: r.sessions > 0 ? Math.round(r.totalDuration / r.sessions) : 0,
@@ -854,27 +827,36 @@ export async function getSourceQuality(
   dateRange: DateRange,
   limit = 10
 ): Promise<SourceQuality[]> {
-  const extractedHost = sql<string>`
-    CASE 
-      WHEN ${sessions.referrer} ~ '^https?://' 
-      THEN regexp_replace(${sessions.referrer}, '^https?://([^/]+).*$', '\\1')
-      ELSE ${sessions.referrer}
-    END
-  `;
-
-  const rows = await db
+  // Same normalised source as the overview's Top Sources (classifySource):
+  // engines are grouped across hosts/ccTLDs, UTM tags take precedence,
+  // self-referrals fold into Direct, and Direct is listed as a row.
+  // Classified once per session in a derived table, grouped on the column.
+  const src = db
     .select({
-      source: extractedHost,
-      visitors: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
-      sessions: sql<number>`COUNT(*)::int`,
-      bounces: sql<number>`COUNT(*) FILTER (WHERE ${sessions.is_bounce} = true)::int`,
-      totalDuration: sql<number>`SUM(${sessions.total_duration})::int`,
-      totalPages: sql<number>`SUM(${sessions.page_count})::int`,
+      source: sql<string>`${sessionSourceClassifier().name}`.as("source"),
+      visitor_id: sessions.visitor_id,
+      is_bounce: sessions.is_bounce,
+      duration: sql<number>`${cappedSessionDuration(sessions.total_duration)}`.as("duration"),
+      page_count: sessions.page_count,
     })
     .from(sessions)
-    .where(and(buildSessionFilters(siteId, dateRange), ne(sessions.referrer, "")))
-    .groupBy(extractedHost)
-    .orderBy(sql`COUNT(DISTINCT ${sessions.visitor_id}) DESC`)
+    .where(buildSessionFilters(siteId, dateRange))
+    .as("src");
+
+  // Rows stay in volume (sessions) order: re-sorting the top-N by quality
+  // made the table look like a volume ranking that it wasn't.
+  const rows = await db
+    .select({
+      source: src.source,
+      visitors: sql<number>`COUNT(DISTINCT ${src.visitor_id})::int`,
+      sessions: sql<number>`COUNT(*)::int`,
+      bounces: sql<number>`COUNT(*) FILTER (WHERE ${src.is_bounce} = true)::int`,
+      totalDuration: sql<number>`COALESCE(SUM(${src.duration}), 0)::int`,
+      totalPages: sql<number>`COALESCE(SUM(${src.page_count}), 0)::int`,
+    })
+    .from(src)
+    .groupBy(src.source)
+    .orderBy(sql`COUNT(*) DESC`)
     .limit(limit);
 
   return rows.map((r) => {
@@ -898,7 +880,7 @@ export async function getSourceQuality(
       avgPages,
       qualityScore,
     };
-  }).sort((a, b) => b.qualityScore - a.qualityScore);
+  });
 }
 
 // ============================================================
@@ -934,18 +916,13 @@ export async function getConnectionTypes(
 export async function getRealtimeStats(
   siteId: string | string[]
 ): Promise<RealtimeStats> {
-  const thirtyMinAgo = subMinutes(new Date(), 30);
-  const conditions = [gte(pageviews.created_at, thirtyMinAgo)];
-  if (Array.isArray(siteId)) {
-    if (siteId.length > 0) {
-      conditions.push(inArray(pageviews.site_id, siteId));
-    } else {
-      conditions.push(sql`1 = 0`);
-    }
-  } else if (siteId !== "all") {
-    conditions.push(eq(pageviews.site_id, siteId));
-  }
-  applyDimensionFilters(conditions, pageviews);
+  const now = new Date();
+  const thirtyMinAgo = subMinutes(now, 30);
+  const conditions: SQL[] = [
+    gte(pageviews.created_at, thirtyMinAgo),
+    siteScopeSql(pageviews.site_id, siteId),
+    ...buildDimensionConditions(pageviews, siteId, { from: thirtyMinAgo, to: now }, filterStore.getStore()),
+  ];
 
   const stats = await db
     .select({
@@ -957,14 +934,15 @@ export async function getRealtimeStats(
     .from(pageviews)
     .where(and(...conditions));
 
+  const activePath = pagePathSql(pageviews.url);
   const activePages = await db
     .select({
-      url: pageviews.url,
+      url: activePath,
       viewers: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
     })
     .from(pageviews)
     .where(and(...conditions, eq(pageviews.is_bot, false)))
-    .groupBy(pageviews.url)
+    .groupBy(activePath)
     .orderBy(sql`COUNT(DISTINCT ${pageviews.visitor_id}) DESC`)
     .limit(10);
 
@@ -1009,16 +987,11 @@ export async function getBotBreakdown(
   siteId: string | string[],
   dateRange: DateRange
 ): Promise<BotBreakdown> {
-  const scopeConditions = [
+  const scopeConditions: SQL[] = [
     gte(pageviews.created_at, dateRange.from),
     lte(pageviews.created_at, dateRange.to),
+    siteScopeSql(pageviews.site_id, siteId),
   ];
-  if (Array.isArray(siteId)) {
-    if (siteId.length > 0) scopeConditions.push(inArray(pageviews.site_id, siteId));
-    else scopeConditions.push(sql`1 = 0`);
-  } else if (siteId !== "all") {
-    scopeConditions.push(eq(pageviews.site_id, siteId));
-  }
 
   const [totals] = await db
     .select({
@@ -1063,85 +1036,195 @@ export async function getBotBreakdown(
 // SEO OVERVIEW
 // ============================================================
 
+/**
+ * Organic search report.
+ *
+ * Built on sessions (entry referrer + first-touch UTMs), not pageviews:
+ *  - document.referrer persists across SPA navigations, so pageview-level
+ *    classification credited every page a searcher browsed to afterwards as
+ *    an "organic landing page" (32.5k of 101.8k "organic" pageviews on one
+ *    site were not the session's entry page).
+ *  - GSC / Bing Webmaster "clicks" are one per SERP click. The closest Xine
+ *    analogue is an organic session (organicSessions), not distinct
+ *    visitor ids — those rotate daily and merge repeat clicks by the same
+ *    IP+UA on one day.
+ *
+ * "Organic" is classifySource's `search` channel: host-anchored engine
+ * rules (every Google ccTLD and the Google app; Bing incl. cn.bing.com;
+ * Yahoo/DuckDuckGo/Ecosia/Baidu/Yandex/…), excluding Gemini/Copilot/
+ * ChatGPT (AI), Gmail/Outlook (email) and anything paid (utm_medium
+ * cpc/ppc/paid* or a gclid/gbraid/wbraid/msclkid click id).
+ */
 export async function getSeoOverview(
   siteId: string | string[],
   dateRange: DateRange
 ) {
-  const dateExpr = buildDateExpr(dateRange, pageviews.created_at);
-
-  const isOrganicSql = sql<boolean>`(
-    ${pageviews.referrer} ILIKE '%google.com%' OR
-    ${pageviews.referrer} ILIKE '%google.co%' OR
-    ${pageviews.referrer} ILIKE '%bing.com%' OR
-    ${pageviews.referrer} ILIKE '%yahoo.com%' OR
-    ${pageviews.referrer} ILIKE '%duckduckgo.com%' OR
-    ${pageviews.referrer} ILIKE '%yandex.ru%' OR
-    ${pageviews.referrer} ILIKE '%yandex.com%' OR
-    ${pageviews.referrer} ILIKE '%ecosia.org%'
-  )`;
-
-  const engineNameSql = sql<string>`
-    CASE
-      WHEN ${pageviews.referrer} ILIKE '%google.%' THEN 'Google'
-      WHEN ${pageviews.referrer} ILIKE '%bing.%' THEN 'Bing'
-      WHEN ${pageviews.referrer} ILIKE '%yahoo.%' THEN 'Yahoo'
-      WHEN ${pageviews.referrer} ILIKE '%duckduckgo.%' THEN 'Duckduckgo'
-      WHEN ${pageviews.referrer} ILIKE '%yandex.%' THEN 'Yandex'
-      WHEN ${pageviews.referrer} ILIKE '%ecosia.%' THEN 'Ecosia'
-      ELSE 'Other'
-    END
-  `;
-
-  // Main overview stats
-  const stats = await db
+  const cls = sessionSourceClassifier();
+  const scope = buildSessionFilters(siteId, dateRange);
+  const organic = and(scope, cls.isOrganicSearch);
+  const dateExpr = buildDateExpr(dateRange, sessions.started_at);
+  const landingPath = pagePathSql(sessions.entry_page);
+  const engineSub = db
     .select({
-      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
-      pageviews: sql<number>`COUNT(*)::int`,
+      engine: sql<string>`${cls.name}`.as("engine"),
+      host: sql<string>`COALESCE(${cls.host}, '(no referrer, UTM-tagged)')`.as("host"),
+      visitor_id: sessions.visitor_id,
+      page_count: sessions.page_count,
     })
-    .from(pageviews)
-    .where(and(buildPageviewFilters(siteId, dateRange), isOrganicSql));
+    .from(sessions)
+    .where(organic)
+    .as("organic_sessions");
 
-  // Top search engines
-  const topEngines = await db
-    .select({
-      engine: engineNameSql,
-      views: sql<number>`COUNT(*)::int`,
-      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
-    })
-    .from(pageviews)
-    .where(and(buildPageviewFilters(siteId, dateRange), isOrganicSql))
-    .groupBy(engineNameSql)
-    .orderBy(sql`COUNT(DISTINCT ${pageviews.visitor_id}) DESC`);
+  const [stats, paid, topEngines, engineHosts, topLandingPages, timeseries] = await Promise.all([
+    // Headline numbers
+    db
+      .select({
+        sessions: sql<number>`COUNT(*)::int`,
+        visitors: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
+        pageviews: sql<number>`COALESCE(SUM(${sessions.page_count}), 0)::int`,
+        bounces: sql<number>`COUNT(*) FILTER (WHERE ${sessions.is_bounce} = true)::int`,
+      })
+      .from(sessions)
+      .where(organic),
 
-  // Top landing pages
-  const topLandingPages = await db
-    .select({
-      url: pageviews.url,
-      views: sql<number>`COUNT(*)::int`,
-      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
-    })
-    .from(pageviews)
-    .where(and(buildPageviewFilters(siteId, dateRange), isOrganicSql))
-    .groupBy(pageviews.url)
-    .orderBy(sql`COUNT(DISTINCT ${pageviews.visitor_id}) DESC`)
-    .limit(50);
+    // Paid search, reported separately so it is visible but never counted as
+    // SEO. Search only: paid social/display (utm_medium=cpc on facebook…)
+    // shares the "paid" channel but is not a search ad click.
+    db
+      .select({ sessions: sql<number>`COUNT(*)::int` })
+      .from(sessions)
+      .where(and(scope, cls.isPaidSearch)),
 
-  // Timeseries
-  const timeseries = await db
-    .select({
-      date: dateExpr,
-      visitors: sql<number>`COUNT(DISTINCT ${pageviews.visitor_id})::int`,
-    })
-    .from(pageviews)
-    .where(and(buildPageviewFilters(siteId, dateRange), isOrganicSql))
-    .groupBy(dateExpr)
-    .orderBy(dateExpr);
+    // Top search engines (classified once per session in a derived table)
+    db
+      .select({
+        engine: engineSub.engine,
+        sessions: sql<number>`COUNT(*)::int`,
+        visitors: sql<number>`COUNT(DISTINCT ${engineSub.visitor_id})::int`,
+        views: sql<number>`COALESCE(SUM(${engineSub.page_count}), 0)::int`,
+      })
+      .from(engineSub)
+      .groupBy(engineSub.engine)
+      .orderBy(sql`COUNT(*) DESC`),
+
+    // Raw referrer hosts behind each engine row (e.g. www.bing.com vs
+    // cn.bing.com), so the engine total can be reconciled host by host.
+    db
+      .select({
+        engine: engineSub.engine,
+        host: engineSub.host,
+        sessions: sql<number>`COUNT(*)::int`,
+      })
+      .from(engineSub)
+      .groupBy(engineSub.engine, engineSub.host)
+      .orderBy(sql`COUNT(*) DESC`)
+      .limit(50),
+
+    // Landing pages = the session's entry page (path only)
+    db
+      .select({
+        url: landingPath,
+        entrances: sql<number>`COUNT(*)::int`,
+        visitors: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
+      })
+      .from(sessions)
+      .where(organic)
+      .groupBy(landingPath)
+      .orderBy(sql`COUNT(*) DESC`)
+      .limit(50),
+
+    // Timeseries (days/hours in the viewer's timezone)
+    db
+      .select({
+        date: dateExpr,
+        sessions: sql<number>`COUNT(*)::int`,
+        visitors: sql<number>`COUNT(DISTINCT ${sessions.visitor_id})::int`,
+        pageviews: sql<number>`COALESCE(SUM(${sessions.page_count}), 0)::int`,
+      })
+      .from(sessions)
+      .where(organic)
+      .groupBy(dateExpr)
+      .orderBy(dateExpr),
+  ]);
+
+  const organicSessions = stats[0]?.sessions || 0;
 
   return {
+    /** Organic search sessions — the GSC/BWT "clicks" analogue. */
+    organicSessions,
+    /** Distinct daily visitor ids (IP+UA hash, rotates daily). */
     organicVisitors: stats[0]?.visitors || 0,
+    /** Pageviews within organic sessions. */
     organicPageviews: stats[0]?.pageviews || 0,
+    organicBounceRate: organicSessions > 0 ? Math.round(((stats[0]?.bounces || 0) / organicSessions) * 100) : 0,
+    paidSearchSessions: paid[0]?.sessions || 0,
     topEngines,
+    engineHosts,
     topLandingPages,
     timeseries,
   };
+}
+
+// ============================================================
+// RETENTION
+// ============================================================
+
+export interface RetentionCohortRow {
+  cohortWeek: string;
+  cohortSize: number;
+  weekNumber: number;
+  returnedUsers: number;
+}
+
+/**
+ * Weekly cohort retention, shared by the dashboard route and the MCP
+ * xine_get_retention tool so the two cannot drift apart.
+ *
+ * Scoped by buildSessionFilters: bots excluded, "all" restricted to the
+ * caller's own sites, parameterised dimension filters. Weeks are ISO weeks
+ * of the wall-clock time in the range's timezone.
+ *
+ * Caveat: visitor_id is hash(IP + UA + daily salt) by design (no cookies),
+ * so the same person gets a new id every day and weeks ≥ 1 stay near 0.
+ * This report measures same-day-id returns only.
+ */
+export async function getRetentionCohorts(
+  siteId: string | string[],
+  dateRange: DateRange,
+  filters?: DimensionFilters
+): Promise<RetentionCohortRow[]> {
+  if (Array.isArray(siteId) && siteId.length === 0) return [];
+  const tz = tzLiteral(dateRange);
+
+  const result = await db.execute(sql`
+    WITH scoped AS (
+      SELECT ${sessions.visitor_id} AS visitor_id, (${sessions.started_at} AT TIME ZONE ${tz}) AS local_start
+      FROM ${sessions}
+      WHERE ${buildSessionFilters(siteId, dateRange, filters)}
+    ),
+    cohorts AS (
+      SELECT visitor_id, DATE_TRUNC('week', MIN(local_start)) AS cohort_week
+      FROM scoped GROUP BY visitor_id
+    ),
+    activity AS (
+      SELECT DISTINCT visitor_id, DATE_TRUNC('week', local_start) AS activity_week
+      FROM scoped
+    ),
+    cohort_size AS (
+      SELECT cohort_week, COUNT(*)::int AS total_users
+      FROM cohorts GROUP BY cohort_week
+    )
+    SELECT
+      to_char(c.cohort_week, 'YYYY-MM-DD') AS "cohortWeek",
+      s.total_users AS "cohortSize",
+      ROUND(EXTRACT(EPOCH FROM (a.activity_week - c.cohort_week)) / 604800)::int AS "weekNumber",
+      COUNT(DISTINCT a.visitor_id)::int AS "returnedUsers"
+    FROM cohorts c
+    JOIN activity a ON a.visitor_id = c.visitor_id
+    JOIN cohort_size s ON s.cohort_week = c.cohort_week
+    GROUP BY c.cohort_week, s.total_users, a.activity_week
+    ORDER BY c.cohort_week DESC, "weekNumber" ASC
+  `);
+
+  return result.rows as unknown as RetentionCohortRow[];
 }

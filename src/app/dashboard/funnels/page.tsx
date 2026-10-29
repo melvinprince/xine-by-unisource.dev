@@ -9,7 +9,7 @@ import HelpTooltip from '@/components/HelpTooltip';
 import FeatureGuide from '@/components/FeatureGuide';
 import PageHeader from '@/components/PageHeader';
 import SectionHeader from '@/components/SectionHeader';
-import { useDashboardContext } from '@/components/DashboardContext';
+import { useDashboardContext, getViewerTimeZone } from '@/components/DashboardContext';
 import FunnelChart from '@/components/charts/FunnelChart';
 
 gsap.registerPlugin(useGSAP);
@@ -65,7 +65,7 @@ export default function FunnelsPage() {
     setLoading(true);
     try {
       const [fRes, gRes] = await Promise.all([
-        fetch(`/api/dashboard/funnels?siteId=${selectedSite}&from=${dateRange.from}&to=${dateRange.to}`),
+        fetch(`/api/dashboard/funnels?${new URLSearchParams({ siteId: selectedSite, from: dateRange.from, to: dateRange.to, tz: getViewerTimeZone() })}`),
         fetch(`/api/sites/${selectedSite}/goals`)
       ]);
       if (!fRes.ok || !gRes.ok) throw new Error('Failed to load data');

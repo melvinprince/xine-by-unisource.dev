@@ -44,7 +44,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
       }}
     >
       <p style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-primary)', fontVariantNumeric: 'tabular-nums' }}>
-        {payload[0].payload.browser}: {payload[0].value.toLocaleString()}
+        {payload[0].payload.browser}: {payload[0].value.toLocaleString()} visitors
       </p>
     </div>
   );
@@ -69,7 +69,7 @@ export default function BarChart({ data, title = "Browsers", onBarClick, selecte
       className="glass-card"
       style={{ padding: '1.5rem', opacity: 0 }}
     >
-      <SectionHeader title={title} />
+      <SectionHeader title={title} description="Unique visitors" />
 
       <div style={{ width: '100%', height: 250 }}>
         <ResponsiveContainer>

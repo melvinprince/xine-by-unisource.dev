@@ -138,7 +138,7 @@ export default function SiteDetailPage() {
               delay={0.15}
             />
             <StatCard
-              label="Avg. Duration"
+              label="Avg. Visit Duration"
               value={stats.avgDuration}
               change={stats.durationChange}
               format="duration"
@@ -239,7 +239,7 @@ export default function SiteDetailPage() {
                 },
                 {
                   key: 'avgDuration' as const,
-                  label: 'Duration',
+                  label: 'Time on Page',
                   align: 'right' as const,
                   render: (v) => (
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -263,18 +263,18 @@ export default function SiteDetailPage() {
                   ),
                 },
                 {
-                  key: 'visitors' as const,
-                  label: 'Visitors',
+                  key: 'sessions' as const,
+                  label: 'Visits',
                   align: 'right' as const,
                   render: (v) => (
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {Number(v).toLocaleString()}
+                      {Number(v ?? 0).toLocaleString()}
                     </span>
                   ),
                 },
                 {
                   key: 'percentage' as const,
-                  label: '%',
+                  label: '% of visits',
                   align: 'right' as const,
                   render: (v) => (
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>

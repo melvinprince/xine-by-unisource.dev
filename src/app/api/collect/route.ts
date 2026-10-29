@@ -1,12 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { db } from "@/lib/db";
 import { sites, pageviews, events, sessions, goalConversions } from "@/lib/db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, gte, inArray, sql } from "drizzle-orm";
 import { getCachedGoals } from "@/lib/goals-cache";
 import { createHash, randomUUID } from "crypto";
 import {
   detectBot,
   encodeBotReason,
+  hostMatchesDomain,
+  inheritSessionVerdict,
   type BotVerdict,
 } from "@/lib/bot-detection";
 import { getClientIp } from "@/lib/client-ip";
@@ -17,21 +19,32 @@ import {
 } from "@/lib/api-key-cache";
 
 // ---- Daily-rotating salt for IP hashing ----
-let dailySalt = "";
-let saltDate = "";
+// Keyed by UTC date. Today's and yesterday's salts are both kept because a
+// visit that spans 00:00 UTC has to be matched against the session it began
+// under the previous salt (see computeVisitorIds).
+const saltCache = new Map<string, string>();
 
-function getDailySalt(): string {
-  const today = new Date().toISOString().slice(0, 10);
-  if (today !== saltDate) {
+function saltForDate(day: string): string {
+  let salt = saltCache.get(day);
+  if (!salt) {
     // VULN-014 FIX: Include server-side secret in salt to prevent precomputation
     const serverSecret = process.env.SESSION_SECRET || process.env.DASHBOARD_PASSWORD || "";
-    dailySalt = createHash("sha256")
-      .update(today + "-wa-pro-salt-" + serverSecret + "-" + process.env.NODE_ENV)
+    salt = createHash("sha256")
+      .update(day + "-wa-pro-salt-" + serverSecret + "-" + process.env.NODE_ENV)
       .digest("hex")
       .slice(0, 16);
-    saltDate = today;
+    if (saltCache.size >= 4) saltCache.clear();
+    saltCache.set(day, salt);
   }
-  return dailySalt;
+  return salt;
+}
+
+function utcDay(offsetDays = 0): string {
+  return new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
+}
+
+function getDailySalt(): string {
+  return saltForDate(utcDay());
 }
 
 function hashIp(ip: string): string {
@@ -51,12 +64,26 @@ function hashIp(ip: string): string {
  * distinct devices/browsers sharing an egress IP, which is the dominant
  * source of visitor undercounting.
  */
-function computeVisitorId(ip: string, userAgent: string): string {
+function computeVisitorId(ip: string, userAgent: string, salt = getDailySalt()): string {
   if (!ip && !userAgent) return "";
   return createHash("sha256")
-    .update(ip + "|" + userAgent + "|" + getDailySalt())
+    .update(ip + "|" + userAgent + "|" + salt)
     .digest("hex")
     .slice(0, 16);
+}
+
+/**
+ * Today's visitor id plus the one the same person had under yesterday's salt.
+ *
+ * Only the first is ever written for a new visit, so multi-day uniqueness is
+ * unchanged (one person on N days is still N daily visitors). The second is
+ * used solely to find a session that is still active across 00:00 UTC, which
+ * previously split into two sessions with the second starting as a bounce.
+ */
+function computeVisitorIds(ip: string, userAgent: string): string[] {
+  const today = computeVisitorId(ip, userAgent);
+  if (!today) return [];
+  return [today, computeVisitorId(ip, userAgent, saltForDate(utcDay(-1)))];
 }
 
 // ---- Request-rate ceilings (per client IP, 1-minute fixed window) ----
@@ -162,6 +189,121 @@ export async function OPTIONS(request: NextRequest) {
   return new NextResponse(null, { status: 204, headers: getHeaders(request) });
 }
 
+// ---- Duration bounds ----
+// The tracker reports ENGAGED (foreground) seconds per page, clamped to
+// 0..1800. The server clamps again because copies of the old t.js, which
+// reported wall-clock time including hours or days in a background tab, stay
+// cached on visitors' browsers and would otherwise keep writing runaway
+// values that dominate every average.
+const MAX_PAGE_DURATION_SECS = 1800; // matches the 30-minute session timeout
+const MAX_SESSION_DURATION_SECS = 4 * 3600;
+
+function clampDuration(val: unknown): number {
+  const raw = Number(val);
+  if (!Number.isFinite(raw)) return 0;
+  return Math.min(Math.max(Math.round(raw), 0), MAX_PAGE_DURATION_SECS);
+}
+
+// ---- Geo-IP ----
+// Only the headers of the CDN actually in front of the origin are trusted.
+// The old chain also read x-country and the client payload, and consulted
+// x-vercel-ip-country first even behind Cloudflare, so anyone could set a
+// visitor's country by sending a header. Override with GEO_HEADER_SOURCE.
+type GeoSource = "cloudflare" | "vercel" | "cloudfront" | "fly";
+
+const GEO_SOURCE: GeoSource = (() => {
+  const configured = (process.env.GEO_HEADER_SOURCE || "").trim().toLowerCase();
+  if (
+    configured === "cloudflare" ||
+    configured === "vercel" ||
+    configured === "cloudfront" ||
+    configured === "fly"
+  ) {
+    return configured;
+  }
+  return process.env.VERCEL ? "vercel" : "cloudflare";
+})();
+
+const GEO_HEADERS: Record<GeoSource, { country: string; city: string | null }> = {
+  cloudflare: { country: "cf-ipcountry", city: "cf-ipcity" },
+  vercel: { country: "x-vercel-ip-country", city: "x-vercel-ip-city" },
+  cloudfront: { country: "cloudfront-viewer-country", city: "cloudfront-viewer-city" },
+  fly: { country: "fly-client-ip-country", city: null },
+};
+
+/**
+ * ISO 3166-1 alpha-2 or "". Cloudflare's "XX" (unknown) and "T1" (Tor exit)
+ * are not countries and used to be stored verbatim as if they were.
+ */
+function normalizeCountry(value: string | null): string {
+  const raw = (value || "").trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(raw) && raw !== "XX" && raw !== "T1" ? raw : "";
+}
+
+function normalizeCity(value: string | null): string {
+  let raw = (value || "").trim();
+  if (!raw) return "";
+  // Vercel URL-encodes the city ("S%C3%A3o%20Paulo"); decoding a plain value
+  // is a no-op, and a malformed escape is kept as sent.
+  try {
+    raw = decodeURIComponent(raw);
+  } catch {
+    // keep raw
+  }
+  return sanitizeString(raw, 128);
+}
+
+function readGeo(request: NextRequest): { country: string; city: string } {
+  const names = GEO_HEADERS[GEO_SOURCE];
+  return {
+    country: normalizeCountry(request.headers.get(names.country)),
+    city: names.city ? normalizeCity(request.headers.get(names.city)) : "",
+  };
+}
+
+// ---- Goal conversions ----
+// goal_conversions.session_id is a foreign key to sessions.id. An event or
+// duration beacon can be processed before the pageview that creates its
+// session row has committed (they are separate beacons handled concurrently),
+// so a foreign-key violation is retried once after a short wait instead of
+// silently losing the conversion.
+const GOAL_FK_RETRY_MS = 2000;
+
+function pgErrorCode(err: unknown): string | undefined {
+  // Drizzle wraps driver errors (DrizzleQueryError), so walk the cause chain.
+  let cur: unknown = err;
+  for (let i = 0; i < 3 && cur && typeof cur === "object"; i++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+async function recordGoalConversion(values: {
+  goal_id: string;
+  site_id: string;
+  session_id: string;
+  visitor_id: string;
+}): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await db.insert(goalConversions).values(values).onConflictDoNothing();
+      return;
+    } catch (err) {
+      if (attempt === 0 && pgErrorCode(err) === "23503") {
+        await new Promise((r) => setTimeout(r, GOAL_FK_RETRY_MS));
+        continue;
+      }
+      console.error(
+        `[collect] Goal conversion insert failed (goal ${values.goal_id}, site ${values.site_id}, session ${values.session_id}):`,
+        err
+      );
+      return;
+    }
+  }
+}
+
 /**
  * Upsert a session record: creates on first pageview, updates on subsequent.
  */
@@ -173,8 +315,8 @@ async function upsertSession(
   verdict: BotVerdict,
   visitorId: string
 ): Promise<void> {
-  const sessionId = (data.session_id as string) || "";
-  const url = (data.url as string) || "";
+  const sessionId = sanitizeString(data.session_id, 128);
+  const url = sanitizeUrl(data.url);
   if (!sessionId) return;
 
   const now = new Date();
@@ -190,18 +332,20 @@ async function upsertSession(
         exit_page: url,
         page_count: 1,
         total_duration: 0,
-        referrer: (data.referrer as string) || "",
-        utm_source: (data.utm_source as string) || "",
-        utm_medium: (data.utm_medium as string) || "",
-        utm_campaign: (data.utm_campaign as string) || "",
+        // Already self-referral-stripped by the pageview case.
+        referrer: sanitizeUrl(data.referrer),
+        utm_source: sanitizeString(data.utm_source, 256),
+        utm_medium: sanitizeString(data.utm_medium, 256),
+        utm_campaign: sanitizeString(data.utm_campaign, 256),
         country,
         city,
-        browser: (data.browser as string) || "",
-        os: (data.os as string) || "",
-        device: (data.device as string) || "",
-        screen: (data.screen as string) || "",
-        timezone: (data.timezone as string) || "",
-        connection_type: (data.connection_type as string) || "",
+        browser: sanitizeString(data.browser, 128),
+        os: sanitizeString(data.os, 128),
+        device: sanitizeString(data.device, 64),
+        screen: sanitizeString(data.screen, 32),
+        language: sanitizeString(data.language, 32),
+        timezone: sanitizeString(data.timezone, 64),
+        connection_type: sanitizeString(data.connection_type, 32),
         is_bot: verdict.isBot,
         bot_reason: encodeBotReason(verdict),
         bot_score: verdict.score,
@@ -223,6 +367,45 @@ async function upsertSession(
   }
 }
 
+interface ResolvedSession {
+  sessionId: string;
+  /**
+   * visitor_id to write on this payload's rows. When an existing session is
+   * continued this is the session's own visitor_id, so a visit that crosses
+   * 00:00 UTC keeps one visitor instead of switching hash mid-session.
+   */
+  visitorId: string;
+  /** Set when the payload was attached to a session flagged as a bot. */
+  botSession: { reason: string | null; score: number | null } | null;
+}
+
+async function findActiveSession(
+  siteId: string,
+  visitorIds: string[],
+  isBot: boolean,
+  since: Date
+) {
+  const rows = await db
+    .select({
+      id: sessions.id,
+      visitor_id: sessions.visitor_id,
+      bot_reason: sessions.bot_reason,
+      bot_score: sessions.bot_score,
+    })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.site_id, siteId),
+        inArray(sessions.visitor_id, visitorIds),
+        eq(sessions.is_bot, isBot),
+        gte(sessions.ended_at, since)
+      )
+    )
+    .orderBy(desc(sessions.ended_at))
+    .limit(1);
+  return rows[0];
+}
+
 /**
  * Reuse an in-flight session for the same visitor, or fall back to the
  * client-supplied id.
@@ -230,38 +413,73 @@ async function upsertSession(
  * Scoped by is_bot so a crawler sharing an egress IP with a real person can
  * never be stitched into that person's session (which would flip is_bounce
  * and inflate page_count on otherwise clean data).
+ *
+ * `visitorIds` is [today, yesterday] (see computeVisitorIds); the most
+ * recently active match under either salt wins.
+ *
+ * With `inheritBot` (events and duration beacons, which carry none of the
+ * environment fields the pageview was judged on) a request that looks human
+ * is still attached to a flagged session when either the client's session id
+ * already is one, or the visitor's only active session is one. The caller
+ * then upgrades the verdict so those rows do not appear as human data.
  */
-async function resolveSessionId(
+async function resolveSession(
   siteId: string,
-  visitorId: string,
+  visitorIds: string[],
   clientSessionId: string,
-  isBot: boolean
-): Promise<string> {
-  if (!visitorId) return clientSessionId || randomUUID();
-  const now = new Date();
-  const thirtyMinsAgo = new Date(now.getTime() - 30 * 60 * 1000);
-  try {
-    const activeSession = await db
-      .select({ id: sessions.id })
-      .from(sessions)
-      .where(
-        and(
-          eq(sessions.site_id, siteId),
-          eq(sessions.visitor_id, visitorId),
-          eq(sessions.is_bot, isBot),
-          sql`${sessions.ended_at} >= ${thirtyMinsAgo}`
-        )
-      )
-      .orderBy(desc(sessions.ended_at))
-      .limit(1);
+  isBot: boolean,
+  inheritBot: boolean
+): Promise<ResolvedSession> {
+  const fallback: ResolvedSession = {
+    sessionId: clientSessionId || randomUUID(),
+    visitorId: visitorIds[0] || "",
+    botSession: null,
+  };
+  const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000);
 
-    if (activeSession.length > 0) {
-      return activeSession[0].id;
+  try {
+    if (inheritBot && !isBot && clientSessionId) {
+      const [own] = await db
+        .select({
+          id: sessions.id,
+          visitor_id: sessions.visitor_id,
+          is_bot: sessions.is_bot,
+          bot_reason: sessions.bot_reason,
+          bot_score: sessions.bot_score,
+        })
+        .from(sessions)
+        .where(and(eq(sessions.id, clientSessionId), eq(sessions.site_id, siteId)))
+        .limit(1);
+      if (own?.is_bot) {
+        return {
+          sessionId: own.id,
+          visitorId: own.visitor_id,
+          botSession: { reason: own.bot_reason, score: own.bot_score },
+        };
+      }
+    }
+
+    if (visitorIds.length === 0) return fallback;
+
+    const active = await findActiveSession(siteId, visitorIds, isBot, thirtyMinsAgo);
+    if (active) {
+      return { sessionId: active.id, visitorId: active.visitor_id, botSession: null };
+    }
+
+    if (inheritBot && !isBot) {
+      const flagged = await findActiveSession(siteId, visitorIds, true, thirtyMinsAgo);
+      if (flagged) {
+        return {
+          sessionId: flagged.id,
+          visitorId: flagged.visitor_id,
+          botSession: { reason: flagged.bot_reason, score: flagged.bot_score },
+        };
+      }
     }
   } catch (err) {
     console.error("[collect] Error resolving session ID:", err);
   }
-  return clientSessionId || randomUUID();
+  return fallback;
 }
 
 /**
@@ -269,41 +487,61 @@ async function resolveSessionId(
  */
 async function processPayload(
   siteId: string,
+  siteDomain: string,
   type: string,
   data: Record<string, unknown>,
   country: string,
   city: string,
   ipHash: string,
-  visitorId: string,
-  verdict: BotVerdict
+  visitorIds: string[],
+  requestVerdict: BotVerdict
 ): Promise<void> {
-  const isBot = verdict.isBot;
-  const botReason = encodeBotReason(verdict);
+  const clientSessionId = sanitizeString(data.session_id, 128);
 
   // Resolve active session server-side to avoid cookie/localStorage consent requirements
-  const sessionId = await resolveSessionId(
+  const resolved = await resolveSession(
     siteId,
-    visitorId,
-    (data.session_id as string) || "",
-    isBot
+    visitorIds,
+    clientSessionId,
+    requestVerdict.isBot,
+    type === "event" || type === "duration"
   );
+  const sessionId = resolved.sessionId;
+  const visitorId = resolved.visitorId;
   data.session_id = sessionId;
+
+  const verdict = resolved.botSession
+    ? inheritSessionVerdict(requestVerdict, resolved.botSession)
+    : requestVerdict;
+  const isBot = verdict.isBot;
+  const botReason = encodeBotReason(verdict);
 
   try {
     switch (type) {
       case "pageview": {
+        // Self-referrals (the site's own domain or any subdomain of it) are
+        // internal navigation, not a traffic source. The tracker only sends
+        // document.referrer on a real landing, but old cached copies, links
+        // between subdomains and visits resumed after the session timeout
+        // still produce them, and they used to show up as a top "source".
+        let referrer = sanitizeUrl(data.referrer);
+        if (referrer && siteDomain && hostMatchesDomain(referrer, siteDomain)) {
+          referrer = "";
+        }
+        data.referrer = referrer;
+
         // Insert pageview row
         // VULN-009 FIX: Sanitize all input fields with length limits
         await db.insert(pageviews).values({
           site_id: siteId,
           url: sanitizeUrl(data.url),
-          referrer: sanitizeUrl(data.referrer),
+          referrer,
           title: sanitizeCsvSafe(data.title, 512),
           utm_source: sanitizeString(data.utm_source, 256),
           utm_medium: sanitizeString(data.utm_medium, 256),
           utm_campaign: sanitizeString(data.utm_campaign, 256),
           visitor_id: visitorId, // Cookieless: salted hash of IP + User-Agent
-          session_id: sanitizeString(data.session_id, 128),
+          session_id: sessionId,
           country,
           city,
           browser: sanitizeString(data.browser, 128),
@@ -321,13 +559,17 @@ async function processPayload(
           bot_score: verdict.score,
         });
 
-        // Upsert session (fire-and-forget within fire-and-forget)
-        upsertSession(siteId, data, country, city, verdict, visitorId);
+        // Awaited: goal_conversions.session_id references sessions.id, so the
+        // session row has to exist before a goal on this (possibly first)
+        // pageview is recorded. Un-awaited, the conversion insert raced the
+        // session insert on another pool connection and lost conversions on
+        // landing pages to FK violations. upsertSession catches its own errors.
+        await upsertSession(siteId, data, country, city, verdict, visitorId);
 
         // Evaluate Pageview Goals.
         // goal_conversions has no is_bot column, so bot traffic is skipped
         // outright rather than polluting conversion counts.
-        if (!isBot) {
+        if (!isBot && sessionId && visitorId) {
           try {
             const siteGoals = await getCachedGoals(siteId);
             const pvGoals = siteGoals.filter((g) => g.type === "pageview");
@@ -340,17 +582,17 @@ async function processPayload(
               else if (goal.condition === "contains" && currentUrl.includes(target)) matched = true;
               else if (goal.condition === "starts_with" && currentUrl.startsWith(target)) matched = true;
 
-              if (matched && sessionId && visitorId) {
-                await db.insert(goalConversions).values({
+              if (matched) {
+                await recordGoalConversion({
                   goal_id: goal.id,
                   site_id: siteId,
                   session_id: sessionId,
                   visitor_id: visitorId,
-                }).onConflictDoNothing(); // prevent duplicate insert errors if any
+                });
               }
             }
           } catch (err) {
-            console.error("[collect] Goal checking error:", err);
+            console.error(`[collect] Pageview goal evaluation error (site ${siteId}):`, err);
           }
         }
 
@@ -367,7 +609,7 @@ async function processPayload(
           name: sanitizeString(data.name, 256) || "unknown",
           properties: safeProps,
           visitor_id: visitorId,
-          session_id: sanitizeString(data.session_id, 128),
+          session_id: sessionId,
           url: sanitizeUrl(data.url),
           is_bot: isBot,
           bot_reason: botReason,
@@ -375,7 +617,7 @@ async function processPayload(
         });
 
         // Evaluate Event Goals (human traffic only — see pageview case)
-        if (!isBot) {
+        if (!isBot && sessionId && visitorId) {
           try {
             const siteGoals = await getCachedGoals(siteId);
             const eventGoals = siteGoals.filter((g) => g.type === "event");
@@ -388,16 +630,18 @@ async function processPayload(
               else if (goal.condition === "contains" && eventName.includes(target)) matched = true;
               else if (goal.condition === "starts_with" && eventName.startsWith(target)) matched = true;
 
-              if (matched && sessionId && visitorId) {
-                await db.insert(goalConversions).values({
+              if (matched) {
+                await recordGoalConversion({
                   goal_id: goal.id,
                   site_id: siteId,
                   session_id: sessionId,
                   visitor_id: visitorId,
-                }).onConflictDoNothing();
+                });
               }
             }
-          } catch (err) { }
+          } catch (err) {
+            console.error(`[collect] Event goal evaluation error (site ${siteId}):`, err);
+          }
         }
         break;
       }
@@ -406,46 +650,86 @@ async function processPayload(
         // NB: no `const sessionId` here — all case clauses share one block
         // scope, so re-declaring it would put the outer binding used by the
         // pageview/event cases into the temporal dead zone.
-        const durationVal = (data.duration as number) || 0;
+        const durationVal = clampDuration(data.duration);
+        const pageUrl = sanitizeUrl(data.url);
 
-        // Update the matching pageview row
-        const rows = await db
-          .select({ id: pageviews.id })
+        // Locate the pageview row this beacon belongs to: first within the
+        // resolved session, then — because a beacon can re-resolve to a
+        // different session than its pageview did (a concurrent tab, or a
+        // tab left idle past the 30-minute window) — the visitor's most recent
+        // view of the same URL in the last day.
+        const pvColumns = {
+          id: pageviews.id,
+          session_id: pageviews.session_id,
+          created_at: pageviews.created_at,
+        };
+        let [pv] = await db
+          .select(pvColumns)
           .from(pageviews)
           .where(
             and(
               eq(pageviews.session_id, sessionId),
-              eq(pageviews.url, (data.url as string) || ""),
+              eq(pageviews.url, pageUrl),
               eq(pageviews.site_id, siteId)
             )
           )
           .orderBy(desc(pageviews.created_at))
           .limit(1);
 
-        if (rows.length > 0) {
-          await db
-            .update(pageviews)
-            .set({ duration: durationVal })
-            .where(eq(pageviews.id, rows[0].id));
+        if (!pv && visitorIds.length > 0) {
+          const candidates = Array.from(new Set([visitorId, ...visitorIds].filter(Boolean)));
+          [pv] = await db
+            .select(pvColumns)
+            .from(pageviews)
+            .where(
+              and(
+                eq(pageviews.site_id, siteId),
+                inArray(pageviews.visitor_id, candidates),
+                eq(pageviews.url, pageUrl),
+                gte(pageviews.created_at, new Date(Date.now() - 24 * 3600 * 1000))
+              )
+            )
+            .orderBy(desc(pageviews.created_at))
+            .limit(1);
         }
 
-        // Also update session total_duration
-        if (sessionId && durationVal > 0) {
+        const durationSessionId = pv?.session_id || sessionId;
+
+        if (pv && durationVal > 0) {
+          // Engaged time only grows, so GREATEST keeps an out-of-order or
+          // earlier heartbeat from shrinking the stored value.
+          await db
+            .update(pageviews)
+            .set({ duration: sql`GREATEST(COALESCE(${pageviews.duration}, 0), ${durationVal})` })
+            .where(eq(pageviews.id, pv.id));
+
+          // Session total = sum of its pages' engaged time (each capped). It
+          // used to be GREATEST(total, this page), i.e. the longest single
+          // page, which undercounted every multi-page visit. GREATEST with
+          // the stored value keeps concurrent beacons from racing it down,
+          // since the sum itself only ever grows.
+          //
+          // ended_at moves to when this page's engagement could have ended at
+          // the latest, not to "now": a beacon from a tab hidden for hours
+          // must not stretch the session (or keep it open for stitching).
+          const pageEnd = new Date(
+            Math.min(Date.now(), pv.created_at.getTime() + durationVal * 1000)
+          );
           try {
             await db
               .update(sessions)
               .set({
-                total_duration: sql`GREATEST(${sessions.total_duration}, ${durationVal})`,
-                ended_at: new Date(),
+                total_duration: sql`LEAST(GREATEST(${sessions.total_duration}, (SELECT COALESCE(SUM(LEAST(${pageviews.duration}, ${MAX_PAGE_DURATION_SECS})), 0) FROM ${pageviews} WHERE ${pageviews.session_id} = ${durationSessionId} AND ${pageviews.site_id} = ${siteId})), ${MAX_SESSION_DURATION_SECS})::int`,
+                ended_at: sql`GREATEST(${sessions.ended_at}, ${pageEnd})`,
               })
-              .where(eq(sessions.id, sessionId));
-          } catch {
-            // Session might not exist yet — ignore
+              .where(and(eq(sessions.id, durationSessionId), eq(sessions.site_id, siteId)));
+          } catch (err) {
+            console.error(`[collect] Session duration update error (site ${siteId}):`, err);
           }
         }
 
         // Evaluate Duration Goals (human traffic only — see pageview case)
-        if (!isBot) {
+        if (!isBot && durationSessionId && visitorId) {
           try {
             const siteGoals = await getCachedGoals(siteId);
             const durationGoals = siteGoals.filter((g) => g.type === "duration");
@@ -457,28 +741,32 @@ async function processPayload(
                 matched = true;
               }
 
-              if (matched && sessionId && visitorId) {
-                await db.insert(goalConversions).values({
+              if (matched) {
+                await recordGoalConversion({
                   goal_id: goal.id,
                   site_id: siteId,
-                  session_id: sessionId,
+                  session_id: durationSessionId,
                   visitor_id: visitorId,
-                }).onConflictDoNothing();
+                });
               }
             }
-          } catch (err) { }
+          } catch (err) {
+            console.error(`[collect] Duration goal evaluation error (site ${siteId}):`, err);
+          }
         }
         break;
       }
     }
   } catch (err) {
-    console.error(`[collect] Background ${type} error:`, err);
+    console.error(`[collect] Background ${type} error (site ${siteId}):`, err);
   }
 }
 
 /**
  * POST /api/collect — Receives tracking data from t.js
- * Fire-and-forget: responds 204 instantly, DB write runs in background.
+ * Responds 204 instantly; the DB writes run in after() so the runtime keeps
+ * them alive past the response (waitUntil on serverless, post-response on a
+ * Node server) instead of an untracked floating promise.
  */
 export async function POST(request: NextRequest) {
   const headers = getHeaders(request);
@@ -526,25 +814,14 @@ export async function POST(request: NextRequest) {
     const siteId = site.siteId;
 
     // ---- Extract Geo-IP ----
-    const country =
-      request.headers.get("x-vercel-ip-country") ||
-      request.headers.get("cf-ipcountry") ||
-      request.headers.get("cloudfront-viewer-country") ||
-      request.headers.get("x-country") ||
-      request.headers.get("fly-client-ip-country") ||
-      (data.country as string) ||
-      "";
-    const city =
-      request.headers.get("x-vercel-ip-city") ||
-      request.headers.get("cf-ipcity") ||
-      (data.city as string) ||
-      "";
+    // Edge headers only; client-supplied data.country / data.city are ignored.
+    const { country, city } = readGeo(request);
 
     // ---- Identity ----
     const userAgent = request.headers.get("user-agent") || "";
     const ipStr = getClientIp(request);
     const ipHash = hashIp(ipStr);
-    const visitorId = computeVisitorId(ipStr, userAgent);
+    const visitorIds = computeVisitorIds(ipStr, userAgent);
 
     // ---- Request-rate ceilings ----
     // Keyed on the IP hash only. The old implementation also keyed on
@@ -567,15 +844,19 @@ export async function POST(request: NextRequest) {
       header: (name) => request.headers.get(name),
       payload: data as Record<string, unknown>,
       siteDomain: site.domain,
+      country,
       floodSuspected: rate.overSoft,
       clientBotHint: data.bot_hint === 1 || data.bot_hint === true,
     });
 
-    // ---- Fire-and-forget ----
+    // ---- Background write ----
     // Bot traffic is written too, flagged with its reason and score, so the
     // filter stays measurable and any false positive is recoverable with an
     // UPDATE instead of being gone forever. Dashboards exclude is_bot rows.
-    processPayload(siteId, type, data, country, city, ipHash, visitorId, verdict);
+    const siteDomain = site.domain;
+    after(() =>
+      processPayload(siteId, siteDomain, type, data, country, city, ipHash, visitorIds, verdict)
+    );
 
     return new NextResponse(null, { status: 204, headers });
   } catch (error) {

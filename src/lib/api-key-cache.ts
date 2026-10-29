@@ -57,6 +57,18 @@ export function setCachedInvalid(apiKey: string): void {
 }
 
 /**
+ * Drop every cached entry for a site. Call after the site's domain (or API
+ * key) changes, so the collect route stops checking Origin against the old
+ * domain without waiting out the 5-minute TTL.
+ */
+export function invalidateCachedSite(siteId: string): void {
+  if (!siteId) return;
+  for (const [apiKey, entry] of cache.entries()) {
+    if (entry.siteId === siteId) cache.delete(apiKey);
+  }
+}
+
+/**
  * Clear the entire cache (useful for testing or manual refresh).
  */
 export function clearApiKeyCache(): void {

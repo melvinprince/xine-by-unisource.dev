@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { events } from "@/lib/db/schema";
-import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
+import { sql, desc } from "drizzle-orm";
 import { verifySiteExists, parseDateRange, siteNotFoundResponse, invalidDateResponse, parseFilters, getUserFromRequest, getUserAccessibleSiteIds } from "@/lib/api-helpers";
 import { buildFilters } from "@/lib/queries";
+import { buildDateExpr } from "@/lib/query-helpers";
 import { filterStore } from "@/lib/filter-store";
 
 export async function GET(request: NextRequest) {
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
   const targetSiteId = siteId === "all" ? await getUserAccessibleSiteIds(userId) : siteId;
 
   // 2. Safely parse and validate date range
-  const dateRange = parseDateRange(fromStr, toStr);
+  const dateRange = parseDateRange(fromStr, toStr, null, searchParams.get("tz"));
   if (!dateRange) return invalidDateResponse();
 
   const filters = parseFilters(searchParams);
@@ -40,16 +41,18 @@ export async function GET(request: NextRequest) {
         .orderBy(desc(sql`count(*)`))
         .limit(50);
         
-      // Additionally, get a timeseries of events
+      // Additionally, get a daily timeseries of events. Days are the
+      // viewer's calendar days (tz param), not the database's UTC days.
+      const dayExpr = buildDateExpr(dateRange, events.created_at, "day");
       const timeseries = await db
         .select({
-          date: sql<string>`to_char(${events.created_at}, 'YYYY-MM-DD')`,
+          date: dayExpr,
           count: sql<number>`count(*)::int`
         })
         .from(events)
         .where(buildFilters(targetSiteId, dateRange, events))
-        .groupBy(sql`to_char(${events.created_at}, 'YYYY-MM-DD')`)
-        .orderBy(sql`to_char(${events.created_at}, 'YYYY-MM-DD')`);
+        .groupBy(dayExpr)
+        .orderBy(dayExpr);
 
       return {
         topEvents,

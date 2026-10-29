@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   const targetSiteId = siteId === "all" ? await getUserAccessibleSiteIds(userId) : siteId;
 
     // 2. Safely parse and validate date range
-    const dateRange = parseDateRange(from, to);
+    const dateRange = parseDateRange(from, to, null, searchParams.get("tz"));
     if (!dateRange) return invalidDateResponse();
 
     const filters = parseFilters(searchParams);

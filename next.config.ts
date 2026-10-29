@@ -24,9 +24,15 @@ const nextConfig: NextConfig = {
       {
         source: '/t.js',
         headers: [
+          // t.js is served at an unversioned URL that is already embedded on
+          // customer sites, so the browser TTL is the only lever for getting a
+          // tracker fix to returning visitors. 60 days meant old and new
+          // tracker data stayed mixed for two months after every deploy; one
+          // day (plus a short background revalidation window) bounds that,
+          // and the existing ETag keeps the daily recheck a cheap 304.
           {
             key: 'Cache-Control',
-            value: 'public, max-age=5184000, stale-while-revalidate=86400',
+            value: 'public, max-age=86400, stale-while-revalidate=3600',
           },
           {
             key: 'Timing-Allow-Origin',

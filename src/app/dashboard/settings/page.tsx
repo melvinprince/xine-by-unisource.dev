@@ -926,11 +926,13 @@ function BannedLoginsManager() {
   };
 
   const parseOS = (ua: string) => {
+    // Mobile first: iOS UAs contain "Mac OS X" and Android UAs contain "Linux".
+    if (/iPhone|iPad|iPod/.test(ua)) return 'iOS';
+    if (ua.includes('Android')) return 'Android';
     if (ua.includes('Windows')) return 'Windows';
+    if (ua.includes('CrOS')) return 'ChromeOS';
     if (ua.includes('Mac OS')) return 'macOS';
     if (ua.includes('Linux')) return 'Linux';
-    if (ua.includes('Android')) return 'Android';
-    if (ua.includes('iPhone') || ua.includes('iPad')) return 'iOS';
     return 'Unknown';
   };
 

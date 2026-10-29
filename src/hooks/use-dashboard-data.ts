@@ -12,7 +12,7 @@ import type {
   CustomEvent,
   Site,
 } from '@/lib/types';
-import type { ActiveFilters } from '@/components/DashboardContext';
+import { getViewerTimeZone, type ActiveFilters } from '@/components/DashboardContext';
 
 interface DashboardData {
   stats: OverviewStats;
@@ -45,6 +45,8 @@ interface UseSiteDetailReturn {
 }
 
 function appendFilters(params: URLSearchParams, filters?: ActiveFilters) {
+  // Viewer timezone for day buckets / date-only bounds (validated server-side).
+  params.set('tz', getViewerTimeZone());
   if (!filters) return;
   Object.entries(filters).forEach(([key, values]) => {
     if (values && values.length > 0) {
